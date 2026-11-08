@@ -1,6 +1,11 @@
 ; <COMPILER: v1.1.37.02a2>
 #Requires AutoHotkey v2.0
 #SingleInstance Force
+;@Ahk2Exe-SetName TrayMute
+;@Ahk2Exe-SetDescription TrayMute - mute microphones and speakers from the system tray
+;@Ahk2Exe-SetVersion 1.0.0
+;@Ahk2Exe-SetCopyright Copyright (c) 2026 Raja Mukherjee (MuteGuard). TrayMute fork - MIT License.
+;@Ahk2Exe-SetMainIcon icons\app.ico
 #UseHook true
 Persistent
 class MicController {
@@ -1934,7 +1939,16 @@ shortcut := A_Startup "\TrayMute.lnk"
 if enable {
 ; Point at the AutoHotkey interpreter, not at the .ahk file: per-user installs may not
 ; associate .ahk files with AutoHotkey, and a shortcut to the script would then do nothing.
-FileCreateShortcut(A_AhkPath, shortcut, A_ScriptDir, '"' A_ScriptFullPath '"', "TrayMute", this.ResolveIconPath(this.IconPathUnmuted), "", this.IconIdxUnmuted + 1)
+; A compiled TrayMute.exe is its own interpreter (and carries the app icon), so it is the
+; target itself. The script version uses icons\app.ico for the shortcut icon.
+if A_IsCompiled {
+FileCreateShortcut(A_ScriptFullPath, shortcut, A_ScriptDir, "", "TrayMute", A_ScriptFullPath, "", 1)
+} else {
+appIcon := A_ScriptDir "\icons\app.ico", appIdx := 1
+if !FileExist(appIcon)
+appIcon := this.ResolveIconPath(this.IconPathUnmuted), appIdx := this.IconIdxUnmuted + 1
+FileCreateShortcut(A_AhkPath, shortcut, A_ScriptDir, '"' A_ScriptFullPath '"', "TrayMute", appIcon, "", appIdx)
+}
 } else if FileExist(shortcut) {
 FileDelete(shortcut)
 }

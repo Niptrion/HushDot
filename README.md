@@ -31,9 +31,27 @@ glance whether your mic is live or muted, and one click toggles it.
 
 ## Getting started
 
-Requirements: Windows 11 and [AutoHotkey v2](https://www.autohotkey.com/).
+Requirements: Windows 11. Choose one of the two options below.
 
-1. **Install AutoHotkey v2**, either from [autohotkey.com](https://www.autohotkey.com/) or with winget:
+### Option A: ready-to-run executable (no AutoHotkey needed)
+
+1. **Download** `TrayMute-v1.0.zip` from the [latest release](https://github.com/Niptrion/TrayMute/releases/latest)
+   and extract it to a folder you own (for example `Documents\TrayMute`). Keep `TrayMute.exe`
+   and the `icons` folder together.
+2. **Run** `TrayMute.exe`. The executable is not code-signed, so Windows SmartScreen may show
+   "Windows protected your PC". Choose **More info → Run anyway**.
+3. **Optional: verify the download.** Compare its SHA256 with the one in the release notes:
+   ```powershell
+   Get-FileHash .\TrayMute-v1.0.zip -Algorithm SHA256
+   ```
+
+`TrayMute.exe` is this repository's `TrayMute.ahk` compiled with Ahk2Exe. It contains the
+AutoHotkey v2 interpreter, which is licensed under the GPL v2; see `THIRD-PARTY-NOTICES.md`
+in the zip.
+
+### Option B: run the script with AutoHotkey v2
+
+1. **Install [AutoHotkey v2](https://www.autohotkey.com/)**, either from the website or with winget:
    ```powershell
    winget install --id AutoHotkey.AutoHotkey --exact --source winget
    ```
@@ -44,15 +62,17 @@ Requirements: Windows 11 and [AutoHotkey v2](https://www.autohotkey.com/).
    If double-clicking does nothing (some per-user AutoHotkey installs don't associate `.ahk`
    files), create a shortcut whose target is the interpreter followed by the script, e.g.
    `"%LOCALAPPDATA%\Programs\AutoHotkey\v2\AutoHotkey64.exe" "C:\path\to\TrayMute.ahk"`.
-4. **Use it**: left-click an icon to mute or unmute it. Right-click it for the menu (Settings,
-   Show Controls, Exit).
+### Using it
+
+Left-click an icon to mute or unmute it. Right-click it for the menu (Settings, Show
+Controls, Exit).
 
 To start TrayMute with Windows, open **Settings → System & About** and tick
-*Run TrayMute on Windows Startup*. This creates a shortcut in your Startup folder that
-launches the script through AutoHotkey (so it works even without a `.ahk` file
-association), and unticking the box removes it.
+*Run TrayMute on Windows Startup*. This creates a shortcut in your Startup folder (for the
+script version it launches the script through AutoHotkey, so it works even without a `.ahk`
+file association), and unticking the box removes it.
 
-Settings are saved to `TrayMute.ini` next to the script. If that folder is not writable,
+Settings are saved to `TrayMute.ini` next to the program. If that folder is not writable,
 for example inside `Program Files`, they go to `%APPDATA%\TrayMute\` instead.
 
 ### Choosing the right microphone

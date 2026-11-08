@@ -44,7 +44,11 @@ byte, with no decompilation, and then modified as listed below.
   of English words in the device name, so localized names (e.g. "Fones de ouvido") and
   Bluetooth headset outputs are listed correctly, and disconnected devices are skipped.
 - The startup shortcut now launches the script through the AutoHotkey interpreter, so it
-  works even when `.ahk` files are not associated with AutoHotkey.
+  works even when `.ahk` files are not associated with AutoHotkey. When compiled, it points
+  at `TrayMute.exe` itself.
+- Added an application icon (`icons/app.ico`, MIT License like the tray icons) and Ahk2Exe
+  directives (name, version, description, icon) so the script can be released as a
+  standalone `TrayMute.exe`.
 
 No other functional changes were made.
 

@@ -5,6 +5,9 @@ TrayMute.ini
 *.lnk
 ~tm_*
 
+# Compiled builds (published as GitHub Release assets, not committed)
+dist/
+
 # Backups and OS clutter
 *.bak
 *.bak-*
