@@ -20,6 +20,8 @@ glance whether your mic is live or muted, and one click toggles it.
 - **Mute every speaker at once** (on by default): the same for audio outputs (headphones,
   Bluetooth earbuds, monitor speakers), so audio stops wherever Windows or an app is playing
   it. Outputs connected while muted start muted. Has its own switch in Settings.
+- **Microphone in-use indicator**: an orange dot on the mic icon whenever any app is using a
+  microphone, even while muted. Hover over the icon to see which app it is.
 - **Global hotkeys** that also work in full-screen apps and games
   (defaults: `Win+Alt+M` for the mic, `Win+Alt+S` for the speaker; configurable)
 - **Floating mini window** with mic/speaker buttons that you can drag anywhere
@@ -96,6 +98,35 @@ may sound much quieter, because the noise removal and level boost are gone.
 Tip: the level meter in Windows Sound settings may keep moving even when the mic is
 muted. To check, record a few seconds (for example with the Voice Recorder app) and
 play it back.
+
+## What "Mute all" can and cannot do
+
+TrayMute mutes microphones the same way Windows Sound settings do: it turns on the Windows
+mute of every microphone. That silences the microphone for practically every app, but it is
+not an absolute guarantee. Audio can still get through in these cases:
+
+- **Exclusive mode.** An app can open a microphone in exclusive mode and talk to the driver
+  directly, bypassing the Windows audio mixer. Most USB and Bluetooth microphones and webcams
+  have no hardware mute, so Windows applies the mute in that mixer, and an exclusive-mode app
+  may still receive sound.
+- **Apps that unmute.** Any app can turn a microphone's mute off again. TrayMute notices
+  within a second and the icon turns red again, but it does not fight the app by re-muting.
+- **Virtual microphones.** Some virtual audio drivers, such as noise-removal apps, ignore the
+  Windows mute on their own virtual microphone. Muting the physical microphone they use
+  silences them too, and "Mute all" does that.
+- **Software below the Windows audio system.** Malware with administrator rights or its own
+  driver can read the hardware directly, and could also close TrayMute. Only a physical
+  switch, or disabling the device (which needs administrator rights), is absolute.
+
+**What TrayMute does about it: the orange dot.** Whenever any app is using a microphone,
+muted or not, the mic icon shows an orange dot in its lower-right corner, like the
+camera and microphone indicator on a phone. Hover over the icon to see which app or program
+it is (for example `In use by: Zoom.exe`). If everything is muted and something still opens a
+microphone, you see it and you know who it is.
+
+The information comes from the records Windows keeps for its own microphone privacy
+indicator, plus the live audio sessions. TrayMute only reads them. Software that bypasses the
+Windows audio system entirely (the last case above) is not visible this way either.
 
 ## Known issues
 

@@ -14,6 +14,8 @@ static CurrentMicName   := ""
 static CurrentMicId     := ""
 static IsMuted          := false
 static LastMicMuteState := -1
+; Apps currently using a microphone (shown as an orange dot on the mic icon, names in the tooltip).
+static MicUsers             := []
 static AvailableSpeakers    := Map()
 static CurrentSpeakerName   := ""
 static CurrentSpeakerId     := ""
@@ -129,11 +131,13 @@ this.ApplyTheme()
 this.EnumerateDevices()
 this.SyncAllGroups()
 this.SetupTray()
+try this.RefreshMicUsers()
 this.UpdateState()
 this.RegisterHotkeys()
 if (this.EnableMiniWindow)
 this.ShowMiniWindow()
 SetTimer((*) => this.UpdateState(), 1000)
+SetTimer((*) => MicController.CheckMicUsers(), 2000)
 this.SetupSpeakerTray()
 OnMessage(0x0219, (wp, lp, *) => MicController.OnDeviceChangeMsg(wp, lp))
 this.ExitHandler := ObjBindMethod(this, "OnExitHandler")
@@ -663,6 +667,131 @@ this.UpdateState()
 TrayTip("Mic Error: " e.Message, this.AppName, "Icon!")
 }
 }
+; ---- Microphone in-use indicator ----------------------------------------------------
+; Runs every 2 s. Refreshes the icon right away when the set of apps changes.
+static CheckMicUsers() {
+try {
+if this.RefreshMicUsers()
+this.UpdateState()
+}
+}
+; Returns true when the list of apps using a microphone changed.
+static RefreshMicUsers() {
+found := Map()
+found.CaseSense := "Off"
+; 1) The per-app flags Windows keeps for its own microphone privacy indicator
+;    (covers Store apps, desktop programs and system services).
+for root in ["HKCU", "HKLM"] {
+base := "Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone"
+this.CollectConsentMicUsers(root, base, found)
+this.CollectConsentMicUsers(root, base "\NonPackaged", found)
+}
+; 2) Live capture sessions, per process.
+try {
+for name in this.GetCaptureSessionApps()
+found[name] := true
+}
+list := []
+for name in found
+list.Push(name)
+changed := this.JoinNames(list) != this.JoinNames(this.MicUsers)
+this.MicUsers := list
+return changed
+}
+static CollectConsentMicUsers(root, key, found) {
+try {
+Loop Reg, root "\" key, "K" {
+name := A_LoopRegName
+if (name = "NonPackaged")
+continue
+try {
+stop  := this.RegReadQword(root, key "\" name, "LastUsedTimeStop")
+start := this.RegReadQword(root, key "\" name, "LastUsedTimeStart")
+} catch {
+continue
+}
+; In use = started and not stopped yet. After a power loss or crash Windows may never
+; write the stop time, so only trust entries started since the last boot.
+if (stop != 0 || start = 0 || start < this.BootFileTime())
+continue
+if InStr(name, "#") {
+name := RegExReplace(name, ".*#")              ; desktop program: exe path with # for \
+if !ProcessExist(name)                         ; stale entry: the program is not running
+continue
+} else {
+name := RegExReplace(name, "_[a-z0-9]{13}$")   ; Store app: drop the publisher id
+}
+found[name] := true
+}
+}
+}
+; Boot time as a FILETIME (100 ns units since 1601), the format of the registry timestamps.
+static BootFileTime() {
+DllCall("GetSystemTimeAsFileTime", "Int64*", &now := 0)
+return now - DllCall("GetTickCount64", "Int64") * 10000
+}
+; AutoHotkey's RegRead cannot read REG_QWORD values, so call the Windows API directly.
+static RegReadQword(root, subKey, valueName) {
+hRoot := root = "HKLM" ? -2147483646 : -2147483647   ; HKEY_LOCAL_MACHINE / HKEY_CURRENT_USER
+buf := Buffer(8, 0), size := 8
+r := DllCall("advapi32\RegGetValueW", "Ptr", hRoot, "Str", subKey, "Str", valueName
+, "UInt", 0x48, "Ptr", 0, "Ptr", buf, "UInt*", &size, "UInt")      ; RRF_RT_QWORD
+if (r != 0)
+throw OSError(r)
+return NumGet(buf, 0, "Int64")
+}
+; Processes with an active audio session on any microphone.
+static GetCaptureSessionApps() {
+apps := []
+iidSM2 := Buffer(16)
+DllCall("ole32\CLSIDFromString", "Str", "{77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F}", "Ptr", iidSM2)
+enumr := ComObject("{BCDE0395-E52F-467C-8E3D-C4579291692E}", "{A95664D2-9614-4F35-A746-DE8DB63617E6}")
+ComCall(3, enumr, "Int", 1, "UInt", 1, "Ptr*", &pColl := 0)
+coll := ComValue(13, pColl)
+ComCall(3, coll, "UInt*", &count := 0)
+self := DllCall("GetCurrentProcessId", "UInt")
+loop count {
+try {
+ComCall(4, coll, "UInt", A_Index - 1, "Ptr*", &pDev := 0)
+dev := ComValue(13, pDev)
+ComCall(3, dev, "Ptr", iidSM2, "UInt", 23, "Ptr", 0, "Ptr*", &pSM := 0)
+sm := ComValue(13, pSM)
+ComCall(5, sm, "Ptr*", &pSE := 0)
+se := ComValue(13, pSE)
+ComCall(3, se, "Int*", &n := 0)
+loop n {
+try {
+ComCall(4, se, "Int", A_Index - 1, "Ptr*", &pCtl := 0)
+ctl := ComValue(13, pCtl)
+ComCall(3, ctl, "Int*", &state := 0)
+if (state != 1)                                  ; AudioSessionStateActive
+continue
+c2 := ComObjQuery(ctl, "{bfb7ff88-7239-4fc9-8fa2-07c950be9c6d}")
+ComCall(14, c2, "UInt*", &pid := 0)              ; IAudioSessionControl2::GetProcessId
+if (pid = 0 || pid = self)
+continue
+name := ""
+try name := ProcessGetName(pid)
+apps.Push(name != "" ? name : "PID " pid)
+}
+}
+}
+}
+return apps
+}
+; "x.ico" -> "x_inuse.ico" (same icon with the orange dot), if that file exists.
+static InUseIconPath(path) {
+if !(path ~= "i)\.ico$")
+return ""
+alt := RegExReplace(path, "i)\.ico$", "_inuse.ico")
+return FileExist(alt) ? alt : ""
+}
+static JoinNames(arr) {
+s := ""
+for x in arr
+s .= (s = "" ? "" : ", ") x
+return s
+}
 ; "Mute all" toggle for one group (microphones or speakers). Returns true if it handled the click.
 static ToggleAllInGroup(g, enabled, fallbackTarget) {
 if !(g.Active || enabled)
@@ -1110,13 +1239,22 @@ this.AutoRefreshDevices()
 }
 if this.IsMuted {
 resolvedPath := this.ResolveIconPath(this.IconPathMuted)
-try TraySetIcon(resolvedPath, this.IconIdxMuted)
-A_IconTip := (this.MuteAllMics || this.MicAll.Active) ? "MIC : Mute (all)" : "MIC : Mute"
+iconIdx := this.IconIdxMuted
+tip := (this.MuteAllMics || this.MicAll.Active) ? "MIC : Mute (all)" : "MIC : Mute"
 } else {
 resolvedPath := this.ResolveIconPath(this.IconPathUnmuted)
-try TraySetIcon(resolvedPath, this.IconIdxUnmuted)
-A_IconTip := "MIC : Active"
+iconIdx := this.IconIdxUnmuted
+tip := "MIC : Active"
 }
+; Orange dot when any app is using a microphone, muted or not (like the iPhone indicator).
+if (this.MicUsers.Length > 0) {
+inUsePath := this.InUseIconPath(resolvedPath)
+if (inUsePath != "")
+resolvedPath := inUsePath
+tip .= "`nIn use by: " this.JoinNames(this.MicUsers)
+}
+try TraySetIcon(resolvedPath, iconIdx)
+A_IconTip := StrLen(tip) > 127 ? SubStr(tip, 1, 124) "..." : tip
 this.LastMicMuteState := this.IsMuted
 this.UpdateTrayMenuIcons()
 this.UpdateSpeakerTrayIcon()

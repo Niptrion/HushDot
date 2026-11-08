@@ -46,6 +46,10 @@ byte, with no decompilation, and then modified as listed below.
 - The startup shortcut now launches the script through the AutoHotkey interpreter, so it
   works even when `.ahk` files are not associated with AutoHotkey. When compiled, it points
   at `TrayMute.exe` itself.
+- Added a microphone in-use indicator: an orange dot on the mic tray icon (new
+  `*_inuse.ico` icons, MIT License) whenever any app is using a microphone, with the app
+  names in the tooltip. It reads the Windows microphone privacy records (read-only registry
+  access) and the active capture sessions.
 - Added an application icon (`icons/app.ico`, MIT License like the tray icons) and Ahk2Exe
   directives (name, version, description, icon) so the script can be released as a
   standalone `TrayMute.exe`.
