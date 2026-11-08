@@ -3,7 +3,7 @@
 #SingleInstance Force
 ;@Ahk2Exe-SetName TrayMute
 ;@Ahk2Exe-SetDescription TrayMute - mute microphones and speakers from the system tray
-;@Ahk2Exe-SetVersion 1.0.0
+;@Ahk2Exe-SetVersion 1.1.0
 ;@Ahk2Exe-SetCopyright Copyright (c) 2026 Raja Mukherjee (MuteGuard). TrayMute fork - MIT License.
 ;@Ahk2Exe-SetMainIcon icons\app.ico
 #UseHook true
@@ -82,6 +82,8 @@ static DeviceCheckCounter   := 0
 static PendingRefreshTimer  := ""
 static IniPath  := ""
 static AppName  := "TrayMute"
+; Shown in the tray menu, Settings and About. Keep ;@Ahk2Exe-SetVersion at the top in sync.
+static Version  := "1.1"
 static SettingsSavedLbl := ""
 static ThemeBg      := ""
 static ThemeCard    := ""
@@ -496,9 +498,10 @@ this.CurrentSpeakerId   := ""
 }
 static SetupTray() {
 A_TrayMenu.Delete()
-A_TrayMenu.Add(this.AppName " v1.0", (*) => this.ShowGUI())
-A_TrayMenu.Disable(this.AppName " v1.0")
-this.SafeMenuSetIcon(A_TrayMenu, this.AppName " v1.0", "shell32.dll", 28)
+menuTitle := this.AppName " v" this.Version
+A_TrayMenu.Add(menuTitle, (*) => this.ShowGUI())
+A_TrayMenu.Disable(menuTitle)
+this.SafeMenuSetIcon(A_TrayMenu, menuTitle, "shell32.dll", 28)
 A_TrayMenu.Add()
 A_TrayMenu.Add("Toggle Microphone", (*) => this.ToggleMicMute())
 this.SafeMenuSetIcon(A_TrayMenu, "Toggle Microphone", this.IconPathUnmuted, this.IconIdxUnmuted)
@@ -1655,7 +1658,7 @@ g.Add("Text", "x0 y0 w" sidebarW " h590 BackgroundF2F4F7")
 g.SetFont("s12 bold", "Segoe UI")
 g.Add("Text", "x20 y18 w170 c1A1A1A BackgroundTrans", this.AppName)
 g.SetFont("s8", "Segoe UI")
-g.Add("Text", "x20 y40 w170 c707070 BackgroundTrans", "v1.0 • Audio Control")
+g.Add("Text", "x20 y40 w170 c707070 BackgroundTrans", "v" this.Version " • Audio Control")
 g.Add("Text", "x16 y62 w178 h1 0x10 BackgroundTrans")
 pages := [[], [], [], [], []]
 g.SetFont("s14 bold", "Segoe UI")
@@ -2002,7 +2005,7 @@ btnSponsor.OnEvent("Click", (*) => Run("https://github.com/sponsors/Niptrion"))
 pages[5].Push(btnSponsor)
 pages[5].Push(g.Add("GroupBox", "x240 y210 w560 h280", "  About TrayMute  "))
 g.SetFont("s12 bold", "Segoe UI")
-pages[5].Push(g.Add("Text", "x256 y236 w528 c1A1A1A", "TrayMute v1.0"))
+pages[5].Push(g.Add("Text", "x256 y236 w528 c1A1A1A", this.AppName " v" this.Version))
 g.SetFont("s9 bold", "Segoe UI")
 pages[5].Push(g.Add("Text", "x256 y262 w528 c5E5E5E", "Modern Windows 11 Audio && Microphone Controller"))
 g.SetFont("s9", "Segoe UI")

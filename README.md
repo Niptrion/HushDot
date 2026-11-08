@@ -37,14 +37,14 @@ Requirements: Windows 11. Choose one of the two options below.
 
 ### Option A: ready-to-run executable (no AutoHotkey needed)
 
-1. **Download** `TrayMute-v1.0.zip` from the [latest release](https://github.com/Niptrion/TrayMute/releases/latest)
+1. **Download** the `TrayMute-v*.zip` file from the [latest release](https://github.com/Niptrion/TrayMute/releases/latest)
    and extract it to a folder you own (for example `Documents\TrayMute`). Keep `TrayMute.exe`
    and the `icons` folder together.
 2. **Run** `TrayMute.exe`. The executable is not code-signed, so Windows SmartScreen may show
    "Windows protected your PC". Choose **More info → Run anyway**.
 3. **Optional: verify the download.** Compare its SHA256 with the one in the release notes:
    ```powershell
-   Get-FileHash .\TrayMute-v1.0.zip -Algorithm SHA256
+   Get-FileHash .\TrayMute-v1.1.zip -Algorithm SHA256
    ```
 
 `TrayMute.exe` is this repository's `TrayMute.ahk` compiled with Ahk2Exe. It contains the
