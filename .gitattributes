@@ -1,0 +1,4 @@
+# Keep the script and docs with LF line endings on every platform
+* text=auto eol=lf
+*.ico binary
+*.png binary

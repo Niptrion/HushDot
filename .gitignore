@@ -1,0 +1,12 @@
+# Personal settings: device names, selected devices and hardware IDs of this PC
+TrayMute.ini
+
+# Shortcuts and temporary files created at runtime
+*.lnk
+~tm_*
+
+# Backups and OS clutter
+*.bak
+*.bak-*
+Thumbs.db
+desktop.ini
