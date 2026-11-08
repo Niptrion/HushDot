@@ -16,6 +16,9 @@ static IsMuted          := false
 static LastMicMuteState := -1
 ; Apps currently using a microphone (shown as an orange dot on the mic icon, names in the tooltip).
 static MicUsers             := []
+; Speaker picked in the UI, applied to Windows after a short pause (see ApplySpeakerChoice).
+static PendingSpeakerChoice := ""
+static SpeakerChoiceTimer   := ""
 static AvailableSpeakers    := Map()
 static CurrentSpeakerName   := ""
 static CurrentSpeakerId     := ""
@@ -387,6 +390,63 @@ flows[name] := (flows.Has(name) && flows[name] != flow) ? 2 : flow
 }
 }
 return flows
+}
+; Endpoint ID (e.g. "{0.0.0.00000000}.{guid}") of the active device with this exact name.
+static GetEndpointIdByName(flow, name) {
+pkey := Buffer(20)
+DllCall("ole32\CLSIDFromString", "Str", "{a45c254e-df1c-4efd-8020-67d146a850e0}", "Ptr", pkey)
+NumPut("UInt", 14, pkey, 16)
+enumr := ComObject("{BCDE0395-E52F-467C-8E3D-C4579291692E}", "{A95664D2-9614-4F35-A746-DE8DB63617E6}")
+ComCall(3, enumr, "Int", flow, "UInt", 1, "Ptr*", &pColl := 0)
+coll := ComValue(13, pColl)
+ComCall(3, coll, "UInt*", &count := 0)
+loop count {
+try {
+ComCall(4, coll, "UInt", A_Index - 1, "Ptr*", &pDev := 0)
+dev := ComValue(13, pDev)
+ComCall(4, dev, "UInt", 0, "Ptr*", &pStore := 0)
+store := ComValue(13, pStore)
+pv := Buffer(24, 0)
+ComCall(5, store, "Ptr", pkey, "Ptr", pv)
+devName := NumGet(pv, 0, "UShort") = 31 ? StrGet(NumGet(pv, 8, "Ptr"), "UTF-16") : ""
+DllCall("ole32\PropVariantClear", "Ptr", pv)
+if (devName != name)
+continue
+ComCall(5, dev, "Ptr*", &pId := 0)
+id := StrGet(pId, "UTF-16")
+DllCall("ole32\CoTaskMemFree", "Ptr", pId)
+return id
+}
+}
+return ""
+}
+; Makes an output the Windows default for playback (console and multimedia roles), so apps
+; playing to the default device (browsers, players) move to it. The communication device used
+; for calls is left alone. Uses IPolicyConfig: not officially documented, but stable since
+; Windows Vista and used by common audio switchers.
+static SetWindowsDefaultOutput(name) {
+id := this.GetEndpointIdByName(0, name)
+if (id = "")
+throw Error("output device not found: " name)
+pc := ComObject("{870AF99C-171D-4F9E-AF0D-E63DF40C2BC9}", "{F8679F50-850A-41CF-9C72-430F290290C8}")
+loop 2
+ComCall(13, pc, "WStr", id, "Int", A_Index - 1)   ; SetDefaultEndpoint: eConsole, eMultimedia
+}
+; Called when the user picks a speaker in Settings or Show Controls. Debounced: scrolling the
+; list with the arrow keys or mouse wheel fires a change for every device, so Windows is only
+; switched once the selection has settled.
+static ApplySpeakerChoice(name) {
+this.PendingSpeakerChoice := name
+if !this.SpeakerChoiceTimer
+this.SpeakerChoiceTimer := ObjBindMethod(this, "CommitSpeakerChoice")
+SetTimer(this.SpeakerChoiceTimer, -350)
+}
+static CommitSpeakerChoice() {
+try {
+this.SetWindowsDefaultOutput(this.PendingSpeakerChoice)
+} catch as e {
+TrayTip("Could not switch the Windows output (" e.Message "). The mute button still controls this device.", this.AppName, "Icon!")
+}
 }
 static EnumerateDevices() {
 this.AvailableMics.Clear()
@@ -1358,6 +1418,7 @@ sel := this.DropdownSpks.Text
 if this.AvailableSpeakers.Has(sel) {
 this.CurrentSpeakerName := sel
 this.CurrentSpeakerId   := this.AvailableSpeakers[sel]
+this.ApplySpeakerChoice(sel)
 this.SaveSettings()
 this.UpdateState()
 }
@@ -1719,7 +1780,7 @@ this.NotifySettingsSaved()
 }
 chkMuteAll.OnEvent("Click", (*) => OnInstantMuteAllToggle())
 pages[1].Push(g.Add("GroupBox", "x240 y280 w560 h190", "  Speaker Device  "))
-pages[1].Push(g.Add("Text", "x256 y305 w400 c1A1A1A", "Select default speaker / output device:"))
+pages[1].Push(g.Add("Text", "x256 y305 w400 c1A1A1A", "Output device (also becomes the Windows default output):"))
 spkList := []
 selSpkIdx := 1
 ctr := 1
@@ -1739,6 +1800,7 @@ selSpk := ddSpk.Text
 if this.AvailableSpeakers.Has(selSpk) {
 this.CurrentSpeakerName := selSpk
 this.CurrentSpeakerId   := this.AvailableSpeakers[selSpk]
+this.ApplySpeakerChoice(selSpk)
 if (this.SettingsLblSpkStatus != "")
 this.SettingsLblSpkStatus.Value := "Active: " this.GetSpkDisplayName()
 if (this.MainGui != "")

@@ -25,6 +25,9 @@ glance whether your mic is live or muted, and one click toggles it.
 - **Global hotkeys** that also work in full-screen apps and games
   (defaults: `Win+Alt+M` for the mic, `Win+Alt+S` for the speaker; configurable)
 - **Floating mini window** with mic/speaker buttons that you can drag anywhere
+- **Switch the Windows output**: picking a speaker in Settings or Show Controls also makes it
+  the Windows default output, so the browser or player moves to it. The device Windows uses
+  for calls is left as it is.
 - **Device selection** with automatic detection when devices are plugged in or removed.
   Inputs and outputs are told apart by what Windows reports, so device names in any
   language are listed correctly.

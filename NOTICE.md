@@ -50,6 +50,11 @@ byte, with no decompilation, and then modified as listed below.
   `*_inuse.ico` icons, MIT License) whenever any app is using a microphone, with the app
   names in the tooltip. It reads the Windows microphone privacy records (read-only registry
   access) and the active capture sessions.
+- Picking a speaker now also makes it the Windows default output (console and multimedia
+  roles; the communication device used for calls is left alone). The original
+  only changed which device the mute button controlled, although the option was labelled
+  as the default output. Uses the `IPolicyConfig` interface, which Windows does not
+  document officially.
 - Added an application icon (`icons/app.ico`, MIT License like the tray icons) and Ahk2Exe
   directives (name, version, description, icon) so the script can be released as a
   standalone `TrayMute.exe`.
