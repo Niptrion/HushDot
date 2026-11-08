@@ -3,7 +3,7 @@
 #SingleInstance Force
 ;@Ahk2Exe-SetName TrayMute
 ;@Ahk2Exe-SetDescription TrayMute - mute microphones and speakers from the system tray
-;@Ahk2Exe-SetVersion 1.1.0
+;@Ahk2Exe-SetVersion 1.2.0
 ;@Ahk2Exe-SetCopyright Copyright (c) 2026 Raja Mukherjee (MuteGuard). TrayMute fork - MIT License.
 ;@Ahk2Exe-SetMainIcon icons\app.ico
 #UseHook true
@@ -86,7 +86,7 @@ static PendingRefreshTimer  := ""
 static IniPath  := ""
 static AppName  := "TrayMute"
 ; Shown in the tray menu, Settings and About. Keep ;@Ahk2Exe-SetVersion at the top in sync.
-static Version  := "1.1"
+static Version  := "1.2"
 static SettingsSavedLbl := ""
 static ThemeBg      := ""
 static ThemeCard    := ""

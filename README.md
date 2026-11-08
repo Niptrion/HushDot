@@ -47,7 +47,7 @@ Requirements: Windows 11. Choose one of the two options below.
    "Windows protected your PC". Choose **More info → Run anyway**.
 3. **Optional: verify the download.** Compare its SHA256 with the one in the release notes:
    ```powershell
-   Get-FileHash .\TrayMute-v1.1.zip -Algorithm SHA256
+   Get-FileHash .\TrayMute-v1.2.zip -Algorithm SHA256
    ```
 
 `TrayMute.exe` is this repository's `TrayMute.ahk` compiled with Ahk2Exe. It contains the
