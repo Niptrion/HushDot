@@ -3,7 +3,7 @@
 #SingleInstance Force
 ;@Ahk2Exe-SetName TrayMute
 ;@Ahk2Exe-SetDescription TrayMute - mute microphones and speakers from the system tray
-;@Ahk2Exe-SetVersion 1.2.0
+;@Ahk2Exe-SetVersion 1.3.0
 ;@Ahk2Exe-SetCopyright Copyright (c) 2026 Raja Mukherjee (MuteGuard). TrayMute fork - MIT License.
 ;@Ahk2Exe-SetMainIcon icons\app.ico
 #UseHook true
@@ -70,13 +70,19 @@ static MiniWindowSavedY := ""
 static MiniHitTestHandler := ""
 static MiniCursorHandler := ""
 static MiniMoveHandler := ""
-static SpeakerGui    := ""
-static SpeakerNID    := ""
-static SpeakerMsg    := 0
-static SpeakerMsgHandler := ""
 static SpeakerLastToggleTime := 0
-static SpeakerTraySetupInProgress := false
-static SpeakerContextMenu := ""
+; Our own tray icons (ExtraTrayIcon); the microphone icon is AutoHotkey's own tray icon.
+static SpkTray       := ""
+static CamTray       := ""
+static RecreateTrayTimer := ""
+; Which icons are shown in the system tray (at least one stays visible).
+static ShowTrayMic   := true
+static ShowTraySpk   := true
+static ShowTrayCam   := true
+; Camera indicator: apps using a camera, and whether the Windows Camera app is open.
+static CamUsers      := []
+static CamAppOpen    := false
+static IconTheme     := "light"
 static SettingsDdMic        := ""
 static SettingsDdSpk        := ""
 static SettingsLblMicStatus := ""
@@ -86,7 +92,7 @@ static PendingRefreshTimer  := ""
 static IniPath  := ""
 static AppName  := "TrayMute"
 ; Shown in the tray menu, Settings and About. Keep ;@Ahk2Exe-SetVersion at the top in sync.
-static Version  := "1.2"
+static Version  := "1.3"
 static SettingsSavedLbl := ""
 static ThemeBg      := ""
 static ThemeCard    := ""
@@ -117,6 +123,7 @@ this.ThemeBorder := "E0E0E0"
 this.ThemeHover  := "E8E8E8"
 }
 iconTheme := this.TaskbarUsesLightTheme() ? "light" : "dark"
+this.IconTheme := iconTheme
 otherTheme := (iconTheme = "light") ? "dark" : "light"
 this.IconPathUnmuted := StrReplace(this.IconPathUnmuted, "\icons\" otherTheme "\", "\icons\" iconTheme "\")
 this.IconPathMuted   := StrReplace(this.IconPathMuted,   "\icons\" otherTheme "\", "\icons\" iconTheme "\")
@@ -132,6 +139,7 @@ return RegRead("HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personaliz
 }
 static Init() {
 this.LoadSettings()
+A_IconHidden := !this.ShowTrayMic
 this.ApplyTheme()
 this.EnumerateDevices()
 this.SyncAllGroups()
@@ -142,11 +150,26 @@ this.RegisterHotkeys()
 if (this.EnableMiniWindow)
 this.ShowMiniWindow()
 SetTimer((*) => this.UpdateState(), 1000)
-SetTimer((*) => MicController.CheckMicUsers(), 2000)
+SetTimer((*) => MicController.CheckUsageIndicators(), 2000)
 this.SetupSpeakerTray()
+try this.RefreshCamUsers()
+this.SetupCameraTray()
+OnMessage(DllCall("RegisterWindowMessage", "Str", "TaskbarCreated", "UInt"), (*) => MicController.OnTaskbarCreated())
 OnMessage(0x0219, (wp, lp, *) => MicController.OnDeviceChangeMsg(wp, lp))
 this.ExitHandler := ObjBindMethod(this, "OnExitHandler")
 OnExit((*) => MicController.OnExitHandler())
+; The startup shortcut passes --autostart. Refresh it so shortcuts made by older versions get it.
+autostart := false
+for arg in A_Args {
+if (arg = "--autostart")
+autostart := true
+}
+if this.RunOnStart
+try this.ApplyStartup(true)
+; Started by hand: there is no window, and new tray icons start hidden behind the ^ arrow,
+; so say where TrayMute is. Not shown when Windows starts it.
+if !autostart
+SetTimer(() => MicController.Notify("TrayMute is running. Its icons are in the system tray next to the clock. If you don't see them, click the ^ arrow and drag them onto the taskbar.", MicController.AppName, "Iconi"), -1500)
 }
 static DetermineIniPath() {
 localIni := A_ScriptDir "\TrayMute.ini"
@@ -263,6 +286,11 @@ this.ShowMiniSpkIcon      := IniRead(this.IniPath, "Settings", "ShowSpkIcon",   
 this.RunOnStart           := IniRead(this.IniPath, "Settings", "RunOnStart",       "0") = "1"
 this.MuteAllMics          := IniRead(this.IniPath, "Settings", "MuteAllMics",      "1") = "1"
 this.MuteAllSpeakers      := IniRead(this.IniPath, "Settings", "MuteAllSpeakers",  "1") = "1"
+this.ShowTrayMic          := IniRead(this.IniPath, "Settings", "TrayMic",          "1") = "1"
+this.ShowTraySpk          := IniRead(this.IniPath, "Settings", "TraySpk",          "1") = "1"
+this.ShowTrayCam          := IniRead(this.IniPath, "Settings", "TrayCam",          "1") = "1"
+if (this.VisibleTrayIconCount() = 0)        ; never leave the app without any tray icon
+this.ShowTrayMic := true
 this.LoadGroupState(this.MicAll)
 this.LoadGroupState(this.SpkAll)
 this.CurrentMicName       := IniRead(this.IniPath, "Settings", "SelectedMic",  "")
@@ -303,6 +331,9 @@ IniWrite(this.ShowMiniSpkIcon ? "1" : "0",  this.IniPath, "Settings", "ShowSpkIc
 IniWrite(this.RunOnStart ? "1" : "0",       this.IniPath, "Settings", "RunOnStart")
 IniWrite(this.MuteAllMics ? "1" : "0",      this.IniPath, "Settings", "MuteAllMics")
 IniWrite(this.MuteAllSpeakers ? "1" : "0",  this.IniPath, "Settings", "MuteAllSpeakers")
+IniWrite(this.ShowTrayMic ? "1" : "0",      this.IniPath, "Settings", "TrayMic")
+IniWrite(this.ShowTraySpk ? "1" : "0",      this.IniPath, "Settings", "TraySpk")
+IniWrite(this.ShowTrayCam ? "1" : "0",      this.IniPath, "Settings", "TrayCam")
 IniWrite(this.CurrentMicName,          this.IniPath, "Settings", "SelectedMic")
 IniWrite(this.CurrentSpeakerName,      this.IniPath, "Settings", "SelectedSpk")
 IniWrite(this.MiniWindowSavedX,        this.IniPath, "Settings", "MiniWindowX")
@@ -332,6 +363,9 @@ IniWrite(this.ShowMiniSpkIcon ? "1" : "0",  this.IniPath, "Settings", "ShowSpkIc
 IniWrite(this.RunOnStart ? "1" : "0",       this.IniPath, "Settings", "RunOnStart")
 IniWrite(this.MuteAllMics ? "1" : "0",      this.IniPath, "Settings", "MuteAllMics")
 IniWrite(this.MuteAllSpeakers ? "1" : "0",  this.IniPath, "Settings", "MuteAllSpeakers")
+IniWrite(this.ShowTrayMic ? "1" : "0",      this.IniPath, "Settings", "TrayMic")
+IniWrite(this.ShowTraySpk ? "1" : "0",      this.IniPath, "Settings", "TraySpk")
+IniWrite(this.ShowTrayCam ? "1" : "0",      this.IniPath, "Settings", "TrayCam")
 IniWrite(this.CurrentMicName,          this.IniPath, "Settings", "SelectedMic")
 IniWrite(this.CurrentSpeakerName,      this.IniPath, "Settings", "SelectedSpk")
 IniWrite(this.MiniWindowSavedX,        this.IniPath, "Settings", "MiniWindowX")
@@ -445,7 +479,7 @@ static CommitSpeakerChoice() {
 try {
 this.SetWindowsDefaultOutput(this.PendingSpeakerChoice)
 } catch as e {
-TrayTip("Could not switch the Windows output (" e.Message "). The mute button still controls this device.", this.AppName, "Icon!")
+MicController.Notify("Could not switch the Windows output (" e.Message "). The mute button still controls this device.", this.AppName, "Icon!")
 }
 }
 static EnumerateDevices() {
@@ -604,7 +638,7 @@ return true
 } catch as err2 {
 }
 }
-TrayTip("Shortcut error: " . cleanKey . "`nCould not register hotkey.", this.AppName, "Icon!")
+MicController.Notify("Shortcut error: " . cleanKey . "`nCould not register hotkey.", this.AppName, "Icon!")
 return false
 }
 }
@@ -727,16 +761,20 @@ cur := SoundGetMute(, target)
 SoundSetMute(!cur,, target)
 this.UpdateState()
 } catch as e {
-TrayTip("Mic Error: " e.Message, this.AppName, "Icon!")
+MicController.Notify("Mic Error: " e.Message, this.AppName, "Icon!")
 }
 }
 ; ---- Microphone in-use indicator ----------------------------------------------------
 ; Runs every 2 s. Refreshes the icon right away when the set of apps changes.
-static CheckMicUsers() {
-try {
-if this.RefreshMicUsers()
+static CheckUsageIndicators() {
+micChanged := false, camChanged := false
+try micChanged := this.RefreshMicUsers()
+if this.ShowTrayCam
+try camChanged := this.RefreshCamUsers()
+if micChanged
 this.UpdateState()
-}
+if camChanged
+this.UpdateCameraTrayIcon()
 }
 ; Returns true when the list of apps using a microphone changed.
 static RefreshMicUsers() {
@@ -744,11 +782,7 @@ found := Map()
 found.CaseSense := "Off"
 ; 1) The per-app flags Windows keeps for its own microphone privacy indicator
 ;    (covers Store apps, desktop programs and system services).
-for root in ["HKCU", "HKLM"] {
-base := "Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone"
-this.CollectConsentMicUsers(root, base, found)
-this.CollectConsentMicUsers(root, base "\NonPackaged", found)
-}
+this.CollectCapabilityUsers("microphone", found)
 ; 2) Live capture sessions, per process.
 try {
 for name in this.GetCaptureSessionApps()
@@ -761,7 +795,36 @@ changed := this.JoinNames(list) != this.JoinNames(this.MicUsers)
 this.MicUsers := list
 return changed
 }
-static CollectConsentMicUsers(root, key, found) {
+; Returns true when the camera users or the Camera app state changed.
+static RefreshCamUsers() {
+found := Map()
+found.CaseSense := "Off"
+this.CollectCapabilityUsers("webcam", found)
+list := []
+for name in found
+list.Push(name)
+appOpen := ProcessExist("WindowsCamera.exe") != 0
+changed := appOpen != this.CamAppOpen || this.JoinNames(list) != this.JoinNames(this.CamUsers)
+this.CamUsers := list
+this.CamAppOpen := appOpen
+return changed
+}
+; capability: "microphone" or "webcam" (Windows privacy records, read-only).
+static CollectCapabilityUsers(capability, found) {
+for root in ["HKCU", "HKLM"] {
+base := "Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\" capability
+this.CollectConsentUsers(root, base, found)
+this.CollectConsentUsers(root, base "\NonPackaged", found)
+}
+}
+; Readable names for a few Store apps; drops the numeric publisher prefix of others.
+static FriendlyAppName(name) {
+static known := Map("Microsoft.WindowsCamera", "Windows Camera", "MSTeams", "Microsoft Teams")
+if known.Has(name)
+return known[name]
+return RegExReplace(name, "^[0-9A-F]{8}\.")
+}
+static CollectConsentUsers(root, key, found) {
 try {
 Loop Reg, root "\" key, "K" {
 name := A_LoopRegName
@@ -784,7 +847,7 @@ continue
 } else {
 name := RegExReplace(name, "_[a-z0-9]{13}$")   ; Store app: drop the publisher id
 }
-found[name] := true
+found[this.FriendlyAppName(name)] := true
 }
 }
 }
@@ -1082,62 +1145,11 @@ cur := SoundGetMute(, target)
 SoundSetMute(!cur,, target)
 this.UpdateState()
 } catch as e {
-TrayTip("Speaker Error: " e.Message, this.AppName, "Icon!")
+MicController.Notify("Speaker Error: " e.Message, this.AppName, "Icon!")
 }
 }
 static SetupSpeakerTray() {
-if (this.SpeakerTraySetupInProgress)
-return
-this.SpeakerTraySetupInProgress := true
-if (this.SpeakerNID) {
-DllCall("shell32\Shell_NotifyIconW", "UInt", 2, "Ptr", this.SpeakerNID)
-this.SpeakerNID := ""
-}
-if (this.SpeakerMsgHandler) {
-try OnMessage(this.SpeakerMsg, this.SpeakerMsgHandler, 0)
-this.SpeakerMsgHandler := ""
-}
-if (this.SpeakerGui != "") {
-try this.SpeakerGui.Destroy()
-this.SpeakerGui := ""
-}
-g := Gui("-Caption +ToolWindow")
-g.BackColor := "FFFFFF"
-g.Show("x-32000 y-32000 w1 h1 Hide")
-this.SpeakerGui := g
-hwnd := g.hwnd
-msgId := 0x405
-this.SpeakerMsg := msgId
-cbSize := A_PtrSize == 8 ? 976 : 956
-nid := Buffer(cbSize, 0)
-NumPut("UInt", cbSize, nid, 0)
-hwndOffset := A_PtrSize == 8 ? 8 : 4
-NumPut("Ptr", hwnd, nid, hwndOffset)
-uidOffset := A_PtrSize == 8 ? 16 : 8
-NumPut("UInt", 3, nid, uidOffset)
-flagsOffset := A_PtrSize == 8 ? 20 : 12
-NumPut("UInt", 0x87, nid, flagsOffset)
-msgOffset := A_PtrSize == 8 ? 24 : 16
-NumPut("UInt", msgId, nid, msgOffset)
-iconOffset := A_PtrSize == 8 ? 32 : 20
-idx  := this.IsSpeakerMuted ? this.SpkIconIdxOff : this.SpkIconIdxOn
-path := this.IsSpeakerMuted ? this.SpkIconPathOff : this.SpkIconPathOn
-resolvedPath := this.ResolveIconPath(path)
-NumPut("Ptr", 0, nid, iconOffset)
-hIcon := LoadPicture(resolvedPath, "w16 h16 Icon" (idx + 1), &imgtype)
-NumPut("Ptr", hIcon, nid, iconOffset)
-tipOffset := A_PtrSize == 8 ? 40 : 24
-tipText := this.IsSpeakerMuted ? "Speaker : Mute" : "Speaker : Active"
-StrPut(tipText, nid.Ptr + tipOffset, 128, "UTF-16")
-DllCall("shell32\Shell_NotifyIconW", "UInt", 0, "Ptr", nid)
-this.SpeakerNID := nid
-versionNid := Buffer(cbSize, 0)
-NumPut("UInt", cbSize, versionNid, 0)
-NumPut("Ptr", hwnd, versionNid, hwndOffset)
-NumPut("UInt", 3, versionNid, uidOffset)
-versionOffset := A_PtrSize == 8 ? 552 : 540
-NumPut("UInt", 4, versionNid, versionOffset)
-DllCall("shell32\Shell_NotifyIconW", "UInt", 4, "Ptr", versionNid)
+if (this.SpkTray = "") {
 spkMenu := Menu()
 spkMenu.Add("Toggle Speaker", (*) => this.ToggleSpeakerMute())
 this.SafeMenuSetIcon(spkMenu, "Toggle Speaker", this.SpkIconPathOn, this.SpkIconIdxOn)
@@ -1151,51 +1163,113 @@ this.SafeMenuSetIcon(spkMenu, "Settings", "shell32.dll", 22)
 spkMenu.Add()
 spkMenu.Add("Exit", (*) => MicController.OnExit())
 this.SafeMenuSetIcon(spkMenu, "Exit", "shell32.dll", 132)
-this.SpeakerContextMenu := spkMenu
-handler := ObjBindMethod(this, "OnSpeakerTrayMsg")
-this.SpeakerMsgHandler := handler
-OnMessage(msgId, handler)
-this.SpeakerTraySetupInProgress := false
+this.SpkTray := ExtraTrayIcon(3, () => MicController.ToggleSpeakerMute("tray"), spkMenu)
+}
+this.UpdateSpeakerTrayIcon()
 }
 static UpdateSpeakerTrayIcon() {
-if !this.SpeakerNID
+if (this.SpkTray = "")
 return
-nid := this.SpeakerNID
-flagsOffset := A_PtrSize == 8 ? 20 : 12
-iconOffset  := A_PtrSize == 8 ? 32 : 20
+if !this.ShowTraySpk {
+this.SpkTray.Hide()
+return
+}
 idx  := this.IsSpeakerMuted ? this.SpkIconIdxOff : this.SpkIconIdxOn
-path := this.IsSpeakerMuted ? this.SpkIconPathOff : this.SpkIconPathOn
-resolvedPath := this.ResolveIconPath(path)
-try {
-prevIcon := NumGet(nid, iconOffset, "Ptr")
-if prevIcon
-DllCall("DestroyIcon", "Ptr", prevIcon)
-}
-try {
-hIcon := LoadPicture(resolvedPath, "w16 h16 Icon" (idx + 1), &imgtype)
-NumPut("Ptr", hIcon, nid, iconOffset)
-}
-tipOffset := A_PtrSize == 8 ? 40 : 24
-tipText := !this.IsSpeakerMuted ? "Speaker : Active"
+path := this.ResolveIconPath(this.IsSpeakerMuted ? this.SpkIconPathOff : this.SpkIconPathOn)
+tip := !this.IsSpeakerMuted ? "Speaker : Active"
 : this.SpkAll.Active ? "Speaker : Mute (all)" : "Speaker : Mute"
-StrPut(tipText, nid.Ptr + tipOffset, 128, "UTF-16")
-NumPut("UInt", 0x86, nid, flagsOffset)
-DllCall("shell32\Shell_NotifyIconW", "UInt", 1, "Ptr", nid)
+this.SpkTray.Show(path, idx, tip)
 }
-static OnSpeakerTrayMsg(wParam, lParam, msg, hwnd) {
-event := lParam & 0xFFFF
-if (event = 0x202) {
-MicController.ToggleSpeakerMute("tray")
-} else if (event = 0x205 || event = 0x204) {
-if (MicController.SpeakerContextMenu) {
-DllCall("SetForegroundWindow", "Ptr", MicController.SpeakerGui.hwnd)
-MicController.SpeakerContextMenu.Show()
+; ---- Camera icon: opens the Windows Camera app and shows who is using a camera -------
+static SetupCameraTray() {
+if (this.CamTray = "") {
+camMenu := Menu()
+camMenu.Add("Open Camera", (*) => MicController.OpenCameraApp())
+this.SafeMenuSetIcon(camMenu, "Open Camera", this.CamIconPath(true, false), 0)
+camMenu.Add("Camera Privacy", (*) => Run("ms-settings:privacy-webcam"))
+this.SafeMenuSetIcon(camMenu, "Camera Privacy", "shell32.dll", 48)
+camMenu.Add()
+camMenu.Add("Show Controls", (*) => this.ShowGUI())
+this.SafeMenuSetIcon(camMenu, "Show Controls", "shell32.dll", 22)
+camMenu.Add("Settings", (*) => this.ShowSettings())
+this.SafeMenuSetIcon(camMenu, "Settings", "shell32.dll", 22)
+camMenu.Add()
+camMenu.Add("Exit", (*) => MicController.OnExit())
+this.SafeMenuSetIcon(camMenu, "Exit", "shell32.dll", 132)
+this.CamTray := ExtraTrayIcon(4, () => MicController.OpenCameraApp(), camMenu)
 }
+this.UpdateCameraTrayIcon()
+}
+; Grey = no app using a camera, violet = Windows Camera app open, green dot = in use.
+static CamIconPath(appOpen, inUse) {
+return A_ScriptDir "\icons\" this.IconTheme "\cam_" (appOpen ? "on" : "off") (inUse ? "_inuse" : "") ".ico"
+}
+static UpdateCameraTrayIcon() {
+if (this.CamTray = "")
+return
+if !this.ShowTrayCam {
+this.CamTray.Hide()
+return
+}
+inUse := this.CamUsers.Length > 0
+tip := inUse ? "Camera : In use by: " this.JoinNames(this.CamUsers)
+: this.CamAppOpen ? "Camera : Camera app open" : "Camera : Off"
+this.CamTray.Show(this.CamIconPath(this.CamAppOpen, inUse), 0, tip)
+}
+static OpenCameraApp() {
+try {
+Run("microsoft.windows.camera:")
+} catch as e {
+MicController.Notify("Could not open the Windows Camera app (" e.Message ").", this.AppName, "Icon!")
+}
+}
+; TrayTip goes through AutoHotkey's own tray icon (the microphone). When that icon is hidden,
+; show the message as a tooltip near the mouse instead, so errors are never silent.
+static Notify(text, title, options := "") {
+if this.ShowTrayMic {
+TrayTip(text, title, options)
+return
+}
+ToolTip(title ": " text)
+SetTimer(() => ToolTip(), -5000)
+}
+; ---- Which icons are shown in the system tray ----------------------------------------
+static VisibleTrayIconCount() => this.ShowTrayMic + this.ShowTraySpk + this.ShowTrayCam
+static SetTrayIconVisible(key, visible) {
+switch key {
+case "mic":
+this.ShowTrayMic := visible
+A_IconHidden := !visible
+if visible
+this.UpdateState()
+case "spk":
+this.ShowTraySpk := visible
+this.UpdateSpeakerTrayIcon()
+case "cam":
+this.ShowTrayCam := visible
+if visible
+try this.RefreshCamUsers()
+this.UpdateCameraTrayIcon()
+}
+}
+; Explorer restarted: it sends "TaskbarCreated" to every top-level window, so re-add our
+; icons once, shortly after (AutoHotkey restores the microphone icon itself).
+static OnTaskbarCreated() {
+if !this.RecreateTrayTimer
+this.RecreateTrayTimer := ObjBindMethod(this, "RecreateExtraTrayIcons")
+SetTimer(this.RecreateTrayTimer, -1000)
+}
+static RecreateExtraTrayIcons() {
+for t in [this.SpkTray, this.CamTray] {
+if (t != "")
+t.Recreate()
 }
 }
 static OnExitHandler(*) {
-if (this.SpeakerNID)
-DllCall("shell32\Shell_NotifyIconW", "UInt", 2, "Ptr", this.SpeakerNID)
+for t in [this.SpkTray, this.CamTray] {
+if (t != "")
+try t.Hide()
+}
 }
 static OnExit() {
 ExitApp()
@@ -1316,11 +1390,14 @@ if (inUsePath != "")
 resolvedPath := inUsePath
 tip .= "`nIn use by: " this.JoinNames(this.MicUsers)
 }
+if this.ShowTrayMic {
 try TraySetIcon(resolvedPath, iconIdx)
 A_IconTip := StrLen(tip) > 127 ? SubStr(tip, 1, 124) "..." : tip
+}
 this.LastMicMuteState := this.IsMuted
 this.UpdateTrayMenuIcons()
 this.UpdateSpeakerTrayIcon()
+this.UpdateCameraTrayIcon()
 this.UpdateGui()
 this.UpdateMiniWindow()
 }
@@ -2021,32 +2098,62 @@ g.SetFont("s14 bold", "Segoe UI")
 pages[4].Push(g.Add("Text", "x240 y18 w560 c1A1A1A", "Tray Icons"))
 g.SetFont("s9", "Segoe UI")
 pages[4].Push(g.Add("Text", "x240 y44 w560 c5E5E5E", "Customize system tray notification icons"))
-pages[4].Push(g.Add("GroupBox", "x240 y75 w560 h190", "  Microphone Tray Icons  "))
-picUnmuted := g.Add("Picture", "x256 y108 w24 h24 Icon" (this.IconIdxUnmuted + 1), this.IconPathUnmuted)
+pages[4].Push(g.Add("GroupBox", "x240 y75 w560 h138", "  Microphone Tray Icon  "))
+picUnmuted := g.Add("Picture", "x256 y100 w24 h24 Icon" (this.IconIdxUnmuted + 1), this.IconPathUnmuted)
 pages[4].Push(picUnmuted)
-pages[4].Push(g.Add("Text", "x290 y112 w120 c1A1A1A", "Unmuted"))
-btnChgUn := g.Add("Button", "x426 y107 w100 h28", "Change...")
+pages[4].Push(g.Add("Text", "x290 y104 w120 c1A1A1A", "Unmuted"))
+btnChgUn := g.Add("Button", "x426 y99 w100 h28", "Change...")
 btnChgUn.OnEvent("Click", (*) => this.OnChangeIcon(1, picUnmuted))
 pages[4].Push(btnChgUn)
-picMuted := g.Add("Picture", "x256 y162 w24 h24 Icon" (this.IconIdxMuted + 1), this.IconPathMuted)
+picMuted := g.Add("Picture", "x256 y138 w24 h24 Icon" (this.IconIdxMuted + 1), this.IconPathMuted)
 pages[4].Push(picMuted)
-pages[4].Push(g.Add("Text", "x290 y166 w120 c1A1A1A", "Muted"))
-btnChgMu := g.Add("Button", "x426 y161 w100 h28", "Change...")
+pages[4].Push(g.Add("Text", "x290 y142 w120 c1A1A1A", "Muted"))
+btnChgMu := g.Add("Button", "x426 y137 w100 h28", "Change...")
 btnChgMu.OnEvent("Click", (*) => this.OnChangeIcon(0, picMuted))
 pages[4].Push(btnChgMu)
-pages[4].Push(g.Add("GroupBox", "x240 y280 w560 h190", "  Speaker Tray Icons  "))
-picSpkOn := g.Add("Picture", "x256 y313 w24 h24 Icon" (this.SpkIconIdxOn + 1), this.SpkIconPathOn)
+chkTrayMic := g.Add("CheckBox", "x256 y180 w520 c1A1A1A", "Show the microphone icon in the system tray")
+chkTrayMic.Value := this.ShowTrayMic ? 1 : 0
+pages[4].Push(chkTrayMic)
+pages[4].Push(g.Add("GroupBox", "x240 y222 w560 h138", "  Speaker Tray Icon  "))
+picSpkOn := g.Add("Picture", "x256 y247 w24 h24 Icon" (this.SpkIconIdxOn + 1), this.SpkIconPathOn)
 pages[4].Push(picSpkOn)
-pages[4].Push(g.Add("Text", "x290 y317 w120 c1A1A1A", "Speaker Active"))
-btnChgSpkOn := g.Add("Button", "x426 y312 w100 h28", "Change...")
+pages[4].Push(g.Add("Text", "x290 y251 w120 c1A1A1A", "Speaker Active"))
+btnChgSpkOn := g.Add("Button", "x426 y246 w100 h28", "Change...")
 btnChgSpkOn.OnEvent("Click", (*) => this.OnChangeSpkIcon(1, picSpkOn))
 pages[4].Push(btnChgSpkOn)
-picSpkOff := g.Add("Picture", "x256 y367 w24 h24 Icon" (this.SpkIconIdxOff + 1), this.SpkIconPathOff)
+picSpkOff := g.Add("Picture", "x256 y285 w24 h24 Icon" (this.SpkIconIdxOff + 1), this.SpkIconPathOff)
 pages[4].Push(picSpkOff)
-pages[4].Push(g.Add("Text", "x290 y371 w120 c1A1A1A", "Speaker Muted"))
-btnChgSpkOff := g.Add("Button", "x426 y366 w100 h28", "Change...")
+pages[4].Push(g.Add("Text", "x290 y289 w120 c1A1A1A", "Speaker Muted"))
+btnChgSpkOff := g.Add("Button", "x426 y284 w100 h28", "Change...")
 btnChgSpkOff.OnEvent("Click", (*) => this.OnChangeSpkIcon(0, picSpkOff))
 pages[4].Push(btnChgSpkOff)
+chkTraySpk := g.Add("CheckBox", "x256 y327 w520 c1A1A1A", "Show the speaker icon in the system tray")
+chkTraySpk.Value := this.ShowTraySpk ? 1 : 0
+pages[4].Push(chkTraySpk)
+pages[4].Push(g.Add("GroupBox", "x240 y369 w560 h145", "  Camera Tray Icon  "))
+camX := 256
+for state in [[false, false], [true, false], [false, true], [true, true]] {
+pages[4].Push(g.Add("Picture", "x" camX " y396 w24 h24", this.CamIconPath(state[1], state[2])))
+camX += 32
+}
+pages[4].Push(g.Add("Text", "x392 y392 w396 h50 c5E5E5E", "Grey: no app is using a camera. Violet: the Windows Camera app is open. Green dot: an app is using a camera (hover the icon to see which). Click the icon to open the Camera app."))
+chkTrayCam := g.Add("CheckBox", "x256 y476 w520 c1A1A1A", "Show the camera icon in the system tray")
+chkTrayCam.Value := this.ShowTrayCam ? 1 : 0
+pages[4].Push(chkTrayCam)
+OnTrayIconToggle(chk, key) {
+visible := chk.Value = 1
+if (!visible && this.VisibleTrayIconCount() <= 1) {
+chk.Value := 1
+MsgBox("At least one TrayMute icon must stay in the system tray.", this.AppName, "Iconi Owner" g.Hwnd)
+return
+}
+this.SetTrayIconVisible(key, visible)
+this.SaveSettings()
+this.NotifySettingsSaved()
+}
+chkTrayMic.OnEvent("Click", (*) => OnTrayIconToggle(chkTrayMic, "mic"))
+chkTraySpk.OnEvent("Click", (*) => OnTrayIconToggle(chkTraySpk, "spk"))
+chkTrayCam.OnEvent("Click", (*) => OnTrayIconToggle(chkTrayCam, "cam"))
 g.SetFont("s14 bold", "Segoe UI")
 pages[5].Push(g.Add("Text", "x240 y18 w560 c1A1A1A 0x80", "System & About"))
 g.SetFont("s9", "Segoe UI")
@@ -2131,11 +2238,11 @@ g.Show("w830 h590")
 }
 static OnRefreshMics(*) {
 this.AutoRefreshDevices()
-TrayTip("Microphone list refreshed.", this.AppName, "Iconi")
+MicController.Notify("Microphone list refreshed.", this.AppName, "Iconi")
 }
 static OnRefreshSpeakers(*) {
 this.AutoRefreshDevices()
-TrayTip("Speaker list refreshed.", this.AppName, "Iconi")
+MicController.Notify("Speaker list refreshed.", this.AppName, "Iconi")
 }
 static ApplyStartup(enable) {
 shortcut := A_Startup "\TrayMute.lnk"
@@ -2145,12 +2252,12 @@ if enable {
 ; A compiled TrayMute.exe is its own interpreter (and carries the app icon), so it is the
 ; target itself. The script version uses icons\app.ico for the shortcut icon.
 if A_IsCompiled {
-FileCreateShortcut(A_ScriptFullPath, shortcut, A_ScriptDir, "", "TrayMute", A_ScriptFullPath, "", 1)
+FileCreateShortcut(A_ScriptFullPath, shortcut, A_ScriptDir, "--autostart", "TrayMute", A_ScriptFullPath, "", 1)
 } else {
 appIcon := A_ScriptDir "\icons\app.ico", appIdx := 1
 if !FileExist(appIcon)
 appIcon := this.ResolveIconPath(this.IconPathUnmuted), appIdx := this.IconIdxUnmuted + 1
-FileCreateShortcut(A_AhkPath, shortcut, A_ScriptDir, '"' A_ScriptFullPath '"', "TrayMute", appIcon, "", appIdx)
+FileCreateShortcut(A_AhkPath, shortcut, A_ScriptDir, '"' A_ScriptFullPath '" --autostart', "TrayMute", appIcon, "", appIdx)
 }
 } else if FileExist(shortcut) {
 FileDelete(shortcut)
@@ -2204,6 +2311,112 @@ this.SpkIconIdxOff  := idx
 this.SaveSettings()
 this.UpdateSpeakerTrayIcon()
 this.NotifySettingsSaved()
+}
+}
+}
+; A tray icon of our own. AutoHotkey manages only one tray icon per script (the microphone),
+; so the speaker and camera icons are added through Shell_NotifyIcon directly.
+class ExtraTrayIcon {
+__New(uid, onLeftClick, menu) {
+this.Uid := uid
+this.OnLeftClick := onLeftClick
+this.Menu := menu
+this.MsgId := 0x8000 + uid         ; callback message in the WM_APP range (speaker 3, camera 4)
+this.Gui := "", this.Nid := "", this.Handler := ""
+this.Path := "", this.Idx := 0, this.Tip := "", this.LastClick := 0, this.AddRetries := 0
+}
+IsShown => this.Nid != ""
+; Adds the icon, or updates it when it is already shown.
+Show(path, idx, tip) {
+Critical                           ; the 1 s state timer must not run in the middle of this
+if this.IsShown
+return this.Update(path, idx, tip)
+this.Gui := Gui("-Caption +ToolWindow")
+this.Gui.Show("x-32000 y-32000 w1 h1 Hide")
+cbSize := A_PtrSize = 8 ? 976 : 956
+nid := Buffer(cbSize, 0)
+NumPut("UInt", cbSize, nid, 0)
+NumPut("Ptr", this.Gui.Hwnd, nid, A_PtrSize = 8 ? 8 : 4)
+NumPut("UInt", this.Uid, nid, A_PtrSize = 8 ? 16 : 8)
+NumPut("UInt", 0x87, nid, A_PtrSize = 8 ? 20 : 12)          ; NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP
+NumPut("UInt", this.MsgId, nid, A_PtrSize = 8 ? 24 : 16)
+this.Nid := nid
+this.SetIconAndTip(path, idx, tip)
+this.Handler := ObjBindMethod(this, "OnTrayMsg")
+OnMessage(this.MsgId, this.Handler)
+; Legacy callback mode (no NIM_SETVERSION): LOWORD(lParam) is the mouse message.
+added := DllCall("shell32\Shell_NotifyIconW", "UInt", 0, "Ptr", nid)  ; NIM_ADD
+; At logon the shell may not be ready yet: try again a few times.
+if (!added && this.AddRetries < 5) {
+this.AddRetries += 1
+SetTimer(ObjBindMethod(this, "Recreate"), -3000)
+} else if added {
+this.AddRetries := 0
+}
+}
+Update(path, idx, tip) {
+Critical
+if !this.IsShown
+return
+if (path = this.Path && idx = this.Idx && tip = this.Tip)
+return
+this.SetIconAndTip(path, idx, tip)
+NumPut("UInt", 0x86, this.Nid, A_PtrSize = 8 ? 20 : 12)     ; NIF_ICON | NIF_TIP | NIF_SHOWTIP
+DllCall("shell32\Shell_NotifyIconW", "UInt", 1, "Ptr", this.Nid)  ; NIM_MODIFY
+}
+SetIconAndTip(path, idx, tip) {
+iconOffset := A_PtrSize = 8 ? 32 : 20
+old := NumGet(this.Nid, iconOffset, "Ptr")
+size := DllCall("GetSystemMetrics", "Int", 49)              ; SM_CXSMICON, scaled for the display
+hIcon := 0
+try hIcon := LoadPicture(path, "w" size " h" size " Icon" (idx + 1), &imgType)
+NumPut("Ptr", hIcon, this.Nid, iconOffset)
+if old
+DllCall("DestroyIcon", "Ptr", old)
+StrPut(SubStr(tip, 1, 127), this.Nid.Ptr + (A_PtrSize = 8 ? 40 : 24), 128, "UTF-16")
+this.Path := path, this.Idx := idx, this.Tip := tip
+}
+Hide() {
+Critical
+if this.IsShown
+DllCall("shell32\Shell_NotifyIconW", "UInt", 2, "Ptr", this.Nid)  ; NIM_DELETE
+this.Release()
+}
+Release() {
+Critical
+if this.Handler
+OnMessage(this.MsgId, this.Handler, 0)
+if this.Nid {
+old := NumGet(this.Nid, A_PtrSize = 8 ? 32 : 20, "Ptr")
+if old
+DllCall("DestroyIcon", "Ptr", old)
+}
+if (this.Gui != "")
+try this.Gui.Destroy()
+this.Gui := "", this.Nid := "", this.Handler := "", this.Path := "", this.Tip := ""
+}
+; After Explorer restarts (or the taskbar is recreated) add the icon again. The old one is
+; deleted first: if the shell still has it, this avoids a duplicate; if not, it fails harmlessly.
+Recreate() {
+Critical
+if !this.IsShown
+return
+path := this.Path, idx := this.Idx, tip := this.Tip
+this.Hide()
+this.Show(path, idx, tip)
+}
+OnTrayMsg(wParam, lParam, msg, hwnd) {
+if (this.Gui = "" || hwnd != this.Gui.Hwnd)
+return
+event := lParam & 0xFFFF
+if (event = 0x202) {                                          ; WM_LBUTTONUP
+if (A_TickCount - this.LastClick < 300)
+return
+this.LastClick := A_TickCount
+this.OnLeftClick.Call()
+} else if ((event = 0x205 || event = 0x204) && this.Menu) {   ; right button
+DllCall("SetForegroundWindow", "Ptr", this.Gui.Hwnd)
+this.Menu.Show()
 }
 }
 }

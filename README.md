@@ -10,7 +10,11 @@ glance whether your mic is live or muted, and one click toggles it.
 
 ## Features
 
-- **Permanent tray icons** for the microphone and the speaker, showing live/muted status
+- **Permanent tray icons** for the microphone, the speaker and the camera, showing their status.
+  Choose which ones to show in **Settings → Tray Icons** (at least one stays visible).
+- **Camera icon**: click it to open the Windows Camera app. It is grey when no app is using a
+  camera and violet while the Camera app is open. A green dot (where Windows provides the
+  data, see Known issues) shows that an app is using a camera; hover to see which.
 - **One-click mute**: left-click the tray icon to toggle the mic (or the speaker)
 - **Mute every microphone at once** (on by default): one click silences all audio inputs,
   including virtual ones such as NVIDIA RTX Voice and microphones plugged in while muted.
@@ -57,7 +61,7 @@ Requirements: Windows 11. Choose one of the two options below.
    "Windows protected your PC". Choose **More info → Run anyway**.
 3. **Optional: verify the download.** Compare its SHA256 with the one in the release notes:
    ```powershell
-   Get-FileHash .\TrayMute-v1.2.zip -Algorithm SHA256
+   Get-FileHash .\TrayMute-v1.3.zip -Algorithm SHA256
    ```
 
 `TrayMute.exe` is this repository's `TrayMute.ahk` compiled with Ahk2Exe. It contains the
@@ -77,10 +81,16 @@ in the zip.
    If double-clicking does nothing (some per-user AutoHotkey installs don't associate `.ahk`
    files), create a shortcut whose target is the interpreter followed by the script, e.g.
    `"%LOCALAPPDATA%\Programs\AutoHotkey\v2\AutoHotkey64.exe" "C:\path\to\TrayMute.ahk"`.
+
 ### Using it
 
-Left-click an icon to mute or unmute it. Right-click it for the menu (Settings, Show
-Controls, Exit).
+TrayMute has no main window. When you start it, a notification says it is running. Windows 11
+puts new tray icons behind the **^** arrow next to the clock, so drag them from there onto the
+taskbar. To hide one again, drag it back onto the **^** arrow, or turn it off in Windows
+**Settings → Personalization → Taskbar → Other system tray icons**.
+
+Left-click the microphone or speaker icon to mute or unmute it, and the camera icon to open
+the Camera app. Right-click any of them for the menu (Settings, Show Controls, Exit).
 
 To start TrayMute with Windows, open **Settings → System & About** and tick
 *Run TrayMute on Windows Startup*. This creates a shortcut in your Startup folder (for the
@@ -148,6 +158,12 @@ Windows audio system entirely (the last case above) is not visible this way eith
   Logitech C922. Unplugging and replugging the webcam (or restarting the PC) brings it back.
   If it happens often, turn off *Mute all microphones* so only your selected microphone is
   toggled.
+- **The camera's green dot may not appear on current Windows 11 versions.** TrayMute reads
+  the per-app camera usage records that Windows keeps for its privacy indicator, and recent
+  Windows 11 versions no longer update those records. The camera icon still opens the Camera
+  app and turns violet while it is open, and Windows' own camera indicator in the tray (and
+  your webcam's light, if it has one) still shows when a camera is in use. Microphone
+  detection is not affected, because it also uses the live audio sessions.
 - **"Mute all speakers" also mutes virtual outputs** such as VB-Cable or Voicemeeter, which
   silences anything you stream or record through them. If you use those, turn the option off.
 

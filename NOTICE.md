@@ -50,6 +50,14 @@ byte, with no decompilation, and then modified as listed below.
   `*_inuse.ico` icons, MIT License) whenever any app is using a microphone, with the app
   names in the tooltip. It reads the Windows microphone privacy records (read-only registry
   access) and the active capture sessions.
+- Added a camera tray icon (new `cam_*.ico` icons, MIT License): it opens the Windows Camera
+  app, turns violet while that app is open and shows a green dot when the Windows camera
+  privacy records report an app using a camera.
+- Added a choice of which tray icons to show (microphone, speaker, camera; at least one).
+  The speaker and camera icons now share one tray-icon helper, which also restores them after
+  Explorer restarts. Messages fall back to a tooltip when the microphone icon is hidden.
+- A notification says TrayMute is running when it is started by hand (not when Windows
+  starts it, which the startup shortcut marks with `--autostart`).
 - Picking a speaker now also makes it the Windows default output (console and multimedia
   roles; the communication device used for calls is left alone). The original
   only changed which device the mute button controlled, although the option was labelled
