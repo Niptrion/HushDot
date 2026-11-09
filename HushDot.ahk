@@ -1,10 +1,10 @@
 ; <COMPILER: v1.1.37.02a2>
 #Requires AutoHotkey v2.0
 #SingleInstance Force
-;@Ahk2Exe-SetName TrayMute
-;@Ahk2Exe-SetDescription TrayMute - mute microphones and speakers from the system tray
-;@Ahk2Exe-SetVersion 1.4.0
-;@Ahk2Exe-SetCopyright Copyright (c) 2026 Raja Mukherjee (MuteGuard). TrayMute fork - MIT License.
+;@Ahk2Exe-SetName HushDot
+;@Ahk2Exe-SetDescription HushDot - Privacy Signals: see which app uses your mic or camera
+;@Ahk2Exe-SetVersion 2.0.0
+;@Ahk2Exe-SetCopyright Copyright (c) 2026 Raja Mukherjee (MuteGuard). HushDot (formerly TrayMute) fork - MIT License.
 ;@Ahk2Exe-SetMainIcon icons\app.ico
 #UseHook true
 Persistent
@@ -56,7 +56,7 @@ static MiniGui       := ""
 static SettingsGui   := ""
 static TextMicStatus := ""
 static TextSpkStatus := ""
-static BtnTrayMute  := ""
+static BtnHushDot  := ""
 static BtnSpkToggle  := ""
 static DropdownMics  := ""
 static DropdownSpks  := ""
@@ -79,12 +79,12 @@ static RecreateTrayTimer := ""
 static ShowTrayMic   := true
 static ShowTraySpk   := true
 static ShowTrayCam   := true
-; "TrayMute is running" box when started by hand (can be turned off).
+; "HushDot is running" box when started by hand (can be turned off).
 static ShowStartupBox := true
 ; Camera indicator: apps using a camera, and whether the Windows Camera app is open.
 static CamUsers      := []
 static CamAppOpen    := false
-; Camera helper (TrayMute.Sensors.exe): live camera users from the Windows sensor activity API.
+; Camera helper (HushDot.Sensors.exe): live camera users from the Windows sensor activity API.
 static SensorHelperPid      := 0
 static SensorHelperRestarts := 0
 static CamHelperActive      := false
@@ -97,9 +97,9 @@ static SettingsLblSpkStatus := ""
 static DeviceCheckCounter   := 0
 static PendingRefreshTimer  := ""
 static IniPath  := ""
-static AppName  := "TrayMute"
+static AppName  := "HushDot"
 ; Shown in the tray menu, Settings and About. Keep ;@Ahk2Exe-SetVersion at the top in sync.
-static Version  := "1.4"
+static Version  := "2.0"
 static SettingsSavedLbl := ""
 static ThemeBg      := ""
 static ThemeCard    := ""
@@ -145,7 +145,12 @@ static TaskbarUsesLightTheme() {
 return RegRead("HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "SystemUsesLightTheme", 0) = 1
 }
 static Init() {
+replacedTrayMuteStartup := this.MigrateFromTrayMute()
 this.LoadSettings()
+if replacedTrayMuteStartup {
+this.RunOnStart := true                 ; TrayMute started with Windows, so HushDot does too
+this.SaveSettings()
+}
 A_IconHidden := !this.ShowTrayMic
 this.ApplyTheme()
 this.EnumerateDevices()
@@ -177,14 +182,80 @@ autostart := true
 if this.RunOnStart
 try this.ApplyStartup(true)
 ; Started by hand: there is no window, and new tray icons start hidden behind the ^ arrow,
-; so say where TrayMute is. Not shown when Windows starts it.
+; so say where HushDot is. Not shown when Windows starts it.
 if !autostart
 SetTimer(() => MicController.ShowStartupNotice(), -1200)
 }
+; ---- Upgrade from TrayMute (the name of HushDot up to v1.4) ---------------------------
+; Runs once per start, before the settings are read. Settings are copied, not moved, so the old
+; version keeps working. Returns true when TrayMute's startup shortcut was replaced.
+static MigrateFromTrayMute() {
+oldDirs := [A_ScriptDir]
+oldLink := A_Startup "\TrayMute.lnk"
+replaced := false
+; A copy run straight from a zip (extracted to the temp folder) must not take over startup.
+fromTemp := InStr(A_ScriptDir "\", A_Temp "\") = 1
+if FileExist(oldLink) {
+target := "", workDir := "", args := ""
+try FileGetShortcut(oldLink, &target, &workDir, &args)
+; Only a shortcut that starts TrayMute (TrayMute.exe, or TrayMute.ahk through AutoHotkey).
+if (target ~= "i)\\TrayMute\.exe$" || args ~= "i)TrayMute\.ahk") {
+if (workDir != "")
+oldDirs.Push(workDir)
+if !fromTemp {
+try {
+FileDelete(oldLink)
+replaced := true
+}
+}
+}
+}
+; Settings next to the program (also in the folder the old shortcut pointed to), or in
+; %APPDATA% when HushDot's own folder is not writable (e.g. Program Files).
+newIni := A_ScriptDir "\HushDot.ini"
+newAppIni := A_AppData "\HushDot\HushDot.ini"
+if (!FileExist(newIni) && !FileExist(newAppIni)) {
+oldIni := ""
+for dir in oldDirs {
+if FileExist(dir "\TrayMute.ini") {
+oldIni := dir "\TrayMute.ini"
+break
+}
+}
+if (oldIni = "" && FileExist(A_AppData "\TrayMute\TrayMute.ini"))
+oldIni := A_AppData "\TrayMute\TrayMute.ini"
+if (oldIni != "") {
+try FileCopy(oldIni, newIni, 0)
+if !FileExist(newIni) {
+try {
+DirCreate(A_AppData "\HushDot")
+FileCopy(oldIni, newAppIni, 0)
+}
+}
+}
+}
+this.CloseRunningTrayMute()
+return replaced
+}
+; Asks a running TrayMute (script or exe) to exit, so the two apps don't run side by side.
+static CloseRunningTrayMute() {
+prev := A_DetectHiddenWindows
+DetectHiddenWindows(true)
+windows := []
+try windows := WinGetList("ahk_class AutoHotkey")
+for hwnd in windows {
+; A window may close while we look at it: one failure must not stop the others.
+try {
+if (hwnd != A_ScriptHwnd && WinGetTitle(hwnd) ~= "i)\\TrayMute\.(ahk|exe)\b")
+PostMessage(0x0111, 65307, , , hwnd)    ; the tray menu's Exit command
+}
+}
+DetectHiddenWindows(prev)
+}
 static DetermineIniPath() {
-localIni := A_ScriptDir "\TrayMute.ini"
-appDataDir := A_AppData "\TrayMute"
-appDataIni := appDataDir "\TrayMute.ini"
+localIni := A_ScriptDir "\HushDot.ini"
+appDataDir := A_AppData "\HushDot"
+appDataIni := appDataDir "\HushDot.ini"
 portableMarker := A_ScriptDir "\.portable"
 if (FileExist(portableMarker) && this.TestFileWrite(localIni))
 return localIni
@@ -231,7 +302,7 @@ dir := RegExReplace(filePath, "\\[^\\]+$", "")
 if (dir != "" && !DirExist(dir)) {
 try DirCreate(dir)
 }
-testFile := (dir != "" ? dir : A_ScriptDir) "\~tm_perm_test_" A_TickCount ".tmp"
+testFile := (dir != "" ? dir : A_ScriptDir) "\~hd_perm_test_" A_TickCount ".tmp"
 f := FileOpen(testFile, "w-wd")
 if IsObject(f) {
 f.Close()
@@ -351,10 +422,10 @@ IniWrite(this.CurrentSpeakerName,      this.IniPath, "Settings", "SelectedSpk")
 IniWrite(this.MiniWindowSavedX,        this.IniPath, "Settings", "MiniWindowX")
 IniWrite(this.MiniWindowSavedY,        this.IniPath, "Settings", "MiniWindowY")
 } catch as e {
-appDataDir := A_AppData "\TrayMute"
+appDataDir := A_AppData "\HushDot"
 if !DirExist(appDataDir)
 try DirCreate(appDataDir)
-this.IniPath := appDataDir "\TrayMute.ini"
+this.IniPath := appDataDir "\HushDot.ini"
 try {
 IniWrite(writeUnmuted, this.IniPath, "Icons", "UnmutedPath")
 IniWrite(this.IconIdxUnmuted,  this.IniPath, "Icons", "UnmutedIndex")
@@ -830,13 +901,13 @@ this.CamUsers := list
 this.CamAppOpen := appOpen
 return changed
 }
-; ---- Camera helper (TrayMute.Sensors.exe) --------------------------------------------
+; ---- Camera helper (HushDot.Sensors.exe) --------------------------------------------
 ; Starts the helper, which reports camera users through the Windows sensor activity API.
 ; Without it (file missing or blocked) the camera falls back to the privacy records.
 static StartSensorHelper() {
 if (this.SensorHelperPid && ProcessExist(this.SensorHelperPid))
 return
-helper := A_ScriptDir "\TrayMute.Sensors.exe"
+helper := A_ScriptDir "\HushDot.Sensors.exe"
 if !FileExist(helper)
 return
 try {
@@ -852,7 +923,7 @@ this.CamHelperUsers := []
 ; Only close it if that PID still belongs to the helper (PIDs are reused).
 if (pid && ProcessExist(pid)) {
 try {
-if (ProcessGetName(pid) = "TrayMute.Sensors.exe")
+if (ProcessGetName(pid) = "HushDot.Sensors.exe")
 ProcessClose(pid)
 }
 }
@@ -1007,7 +1078,7 @@ return s
 static ToggleAllInGroup(g, enabled, fallbackTarget) {
 if !(g.Active || enabled)
 return false
-; Speakers: the selected output was muted outside TrayMute, so it is what the icon shows
+; Speakers: the selected output was muted outside HushDot, so it is what the icon shows
 ; as muted; unmute it instead of muting everything.
 if (g = this.SpkAll && this.SpkFollowsSelected && !g.Active && fallbackTarget != "") {
 try {
@@ -1018,7 +1089,7 @@ return true
 }
 }
 allMuted := this.AllInGroupMuted(g)
-; Restore when every device is muted (also when muted outside TrayMute: the gray icon
+; Restore when every device is muted (also when muted outside HushDot: the gray icon
 ; needs only one click), or when the option was turned off while still muted.
 if ((g.Active && (allMuted = 1 || !enabled)) || (enabled && allMuted = 1)) {
 this.RestoreGroup(g, fallbackTarget)
@@ -1135,7 +1206,7 @@ for id in g.RestoreIds {
 if !present.Has(id)
 this.AddUniqueId(pending, id)
 }
-; Fallback: no list at all (muted outside TrayMute, or the .ini was lost), or nothing
+; Fallback: no list at all (muted outside HushDot, or the .ini was lost), or nothing
 ; on the list could be restored and every device is still muted (avoids a second click).
 if (!hadList || (restored = 0 && this.AllInGroupMuted(g) = 1)) {
 if (fallbackTarget != "")
@@ -1314,7 +1385,7 @@ static ToastsEnabled() {
 try return RegRead("HKCU\Software\Microsoft\Windows\CurrentVersion\PushNotifications", "ToastEnabled", 1) != 0
 return true
 }
-; "TrayMute is running" box above the clock, shown when TrayMute is started by hand: there is no
+; "HushDot is running" box above the clock, shown when HushDot is started by hand: there is no
 ; main window and new tray icons start hidden behind the ^ arrow. A window of its own, because
 ; Windows notifications may be off. Closes on OK, Esc or after 15 s, without taking the focus.
 static ShowStartupNotice() {
@@ -1329,7 +1400,7 @@ g.MarginX := 18, g.MarginY := 16
 appIcon := A_IsCompiled ? A_ScriptFullPath : A_ScriptDir "\icons\app.ico"
 try g.Add("Picture", "w32 h32 Icon1", appIcon)
 g.SetFont("s11 bold c" fg, "Segoe UI")
-g.Add("Text", "x+12 yp+6 w300", "TrayMute is running")
+g.Add("Text", "x+12 yp+6 w300", "HushDot is running")
 g.SetFont("s9 norm c" sub, "Segoe UI")
 g.Add("Text", "xm y+16 w344", "Its icons are in the system tray, next to the clock. If you don't see them, click the ^ arrow there and drag them onto the taskbar.")
 chk := g.Add("CheckBox", "xm y+14 w230 c" sub, "Don't show this again")
@@ -1585,8 +1656,8 @@ g.SetFont("s16 bold", "Segoe UI")
 this.TextMicStatus := g.Add("Text", "xm y+6 w368 h40 center Background" card, "Checking...")
 this.TextMicStatus.Opt("c" sub)
 g.SetFont("s10", "Segoe UI")
-this.BtnTrayMute := g.Add("Button", "xm y+4 w368 h38", "Toggle Mic")
-this.BtnTrayMute.OnEvent("Click", (*) => this.ToggleMicMute())
+this.BtnHushDot := g.Add("Button", "xm y+4 w368 h38", "Toggle Mic")
+this.BtnHushDot.OnEvent("Click", (*) => this.ToggleMicMute())
 g.Add("Text", "xm y+12 w368 h1 0x10")
 g.SetFont("s9 bold", "Segoe UI")
 g.Add("Text", "xm y+10 w368 h28 0x200 Background" card, "   Speaker / Output").Opt("c" fg)
@@ -1647,11 +1718,11 @@ try {
 if this.IsMuted {
 this.TextMicStatus.Value := "  MICROPHONE MUTED"
 this.TextMicStatus.Opt("cE81123 Background" card)
-this.BtnTrayMute.Text := "Unmute Microphone"
+this.BtnHushDot.Text := "Unmute Microphone"
 } else {
 this.TextMicStatus.Value := "  MICROPHONE LIVE"
 this.TextMicStatus.Opt("c0F7B0F Background" card)
-this.BtnTrayMute.Text := "Mute Microphone"
+this.BtnHushDot.Text := "Mute Microphone"
 }
 }
 try {
@@ -1693,7 +1764,7 @@ if (this.ShowMiniSpkIcon)
 visibleCount++
 windowW := margin + (btnSize * visibleCount) + (margin * (visibleCount - 1)) + margin
 windowH := margin + btnSize + margin
-m := Gui("-Caption +AlwaysOnTop +ToolWindow -DPIScale +E0x08000000" borderStyle, "TrayMuteMini")
+m := Gui("-Caption +AlwaysOnTop +ToolWindow -DPIScale +E0x08000000" borderStyle, "HushDotMini")
 m.BackColor := bg
 this.MiniGui := m
 this.MiniMenu := Menu()
@@ -1935,7 +2006,7 @@ g.Add("Text", "x0 y0 w" sidebarW " h590 BackgroundF2F4F7")
 g.SetFont("s12 bold", "Segoe UI")
 g.Add("Text", "x20 y18 w170 c1A1A1A BackgroundTrans", this.AppName)
 g.SetFont("s8", "Segoe UI")
-g.Add("Text", "x20 y40 w170 c707070 BackgroundTrans", "v" this.Version " • Audio Control")
+g.Add("Text", "x20 y40 w170 c707070 BackgroundTrans", "v" this.Version " • Privacy Signals")
 g.Add("Text", "x16 y62 w178 h1 0x10 BackgroundTrans")
 pages := [[], [], [], [], []]
 g.SetFont("s14 bold", "Segoe UI")
@@ -2283,7 +2354,7 @@ OnTrayIconToggle(chk, key) {
 visible := chk.Value = 1
 if (!visible && this.VisibleTrayIconCount() <= 1) {
 chk.Value := 1
-MsgBox("At least one TrayMute icon must stay in the system tray.", this.AppName, "Iconi Owner" g.Hwnd)
+MsgBox("At least one HushDot icon must stay in the system tray.", this.AppName, "Iconi Owner" g.Hwnd)
 return
 }
 this.SetTrayIconVisible(key, visible)
@@ -2298,7 +2369,7 @@ pages[5].Push(g.Add("Text", "x240 y18 w560 c1A1A1A 0x80", "System & About"))
 g.SetFont("s9", "Segoe UI")
 pages[5].Push(g.Add("Text", "x240 y44 w560 c5E5E5E", "Manage startup settings and application information"))
 pages[5].Push(g.Add("GroupBox", "x240 y75 w560 h130", "  System Integration  "))
-chkStart := g.Add("CheckBox", "x256 y100 w300 c1A1A1A", "Run TrayMute on Windows Startup")
+chkStart := g.Add("CheckBox", "x256 y100 w300 c1A1A1A", "Run HushDot on Windows Startup")
 chkStart.Value := this.RunOnStart ? 1 : 0
 pages[5].Push(chkStart)
 OnInstantStartupToggle() {
@@ -2308,20 +2379,20 @@ this.SaveSettings()
 this.NotifySettingsSaved()
 }
 chkStart.OnEvent("Click", (*) => OnInstantStartupToggle())
-chkNotice := g.Add("CheckBox", "x256 y124 w520 c1A1A1A", "Show " Chr(34) "TrayMute is running" Chr(34) " when TrayMute is started by hand")
+chkNotice := g.Add("CheckBox", "x256 y124 w520 c1A1A1A", "Show " Chr(34) "HushDot is running" Chr(34) " when HushDot is started by hand")
 chkNotice.Value := this.ShowStartupBox ? 1 : 0
 pages[5].Push(chkNotice)
 chkNotice.OnEvent("Click", (*) => (this.ShowStartupBox := chkNotice.Value = 1, this.SaveSettings(), this.NotifySettingsSaved()))
 btnSponsor := g.Add("Button", "x256 y156 w160 h32", "💖 Sponsor")
 btnSponsor.OnEvent("Click", (*) => Run("https://github.com/sponsors/Niptrion"))
 pages[5].Push(btnSponsor)
-pages[5].Push(g.Add("GroupBox", "x240 y210 w560 h280", "  About TrayMute  "))
+pages[5].Push(g.Add("GroupBox", "x240 y210 w560 h280", "  About HushDot  "))
 g.SetFont("s12 bold", "Segoe UI")
 pages[5].Push(g.Add("Text", "x256 y236 w528 c1A1A1A", this.AppName " v" this.Version))
 g.SetFont("s9 bold", "Segoe UI")
-pages[5].Push(g.Add("Text", "x256 y262 w528 c5E5E5E", "Modern Windows 11 Audio && Microphone Controller"))
+pages[5].Push(g.Add("Text", "x256 y262 w528 c5E5E5E", "Privacy Signals for Windows 11 (formerly TrayMute)"))
 g.SetFont("s9", "Segoe UI")
-pages[5].Push(g.Add("Text", "x256 y288 w528 c1A1A1A", "TrayMute provides instant, unified control over your microphone and speaker devices. Designed with a sleek Windows 11 native interface, it offers low-latency global muting, real-time hardware status indicators, and background resilience."))
+pages[5].Push(g.Add("Text", "x256 y288 w528 c1A1A1A", "HushDot shows when any app is using your microphone (orange dot) or camera (green dot), and which app it is, and mutes every microphone or speaker with one click, a hotkey or the floating mini window."))
 pages[5].Push(g.Add("Text", "x256 y342 w528 c5E5E5E", "• Global hotkeys with full-screen game and application compatibility`n• Intelligent device detection with auto-select and auto-refresh`n• Floating mini overlay widget and independent dual tray icons"))
 btnCredits := g.Add("Button", "x256 y432 w160 h34", "📜 Créditos")
 btnCredits.OnEvent("Click", (*) => Run("https://github.com/xionraj/MuteGuard"))
@@ -2388,19 +2459,19 @@ this.AutoRefreshDevices()
 MicController.Notify("Speaker list refreshed.", this.AppName, "Iconi")
 }
 static ApplyStartup(enable) {
-shortcut := A_Startup "\TrayMute.lnk"
+shortcut := A_Startup "\HushDot.lnk"
 if enable {
 ; Point at the AutoHotkey interpreter, not at the .ahk file: per-user installs may not
 ; associate .ahk files with AutoHotkey, and a shortcut to the script would then do nothing.
-; A compiled TrayMute.exe is its own interpreter (and carries the app icon), so it is the
+; A compiled HushDot.exe is its own interpreter (and carries the app icon), so it is the
 ; target itself. The script version uses icons\app.ico for the shortcut icon.
 if A_IsCompiled {
-FileCreateShortcut(A_ScriptFullPath, shortcut, A_ScriptDir, "--autostart", "TrayMute", A_ScriptFullPath, "", 1)
+FileCreateShortcut(A_ScriptFullPath, shortcut, A_ScriptDir, "--autostart", "HushDot", A_ScriptFullPath, "", 1)
 } else {
 appIcon := A_ScriptDir "\icons\app.ico", appIdx := 1
 if !FileExist(appIcon)
 appIcon := this.ResolveIconPath(this.IconPathUnmuted), appIdx := this.IconIdxUnmuted + 1
-FileCreateShortcut(A_AhkPath, shortcut, A_ScriptDir, '"' A_ScriptFullPath '" --autostart', "TrayMute", appIcon, "", appIdx)
+FileCreateShortcut(A_AhkPath, shortcut, A_ScriptDir, '"' A_ScriptFullPath '" --autostart', "HushDot", appIcon, "", appIdx)
 }
 } else if FileExist(shortcut) {
 FileDelete(shortcut)

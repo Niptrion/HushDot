@@ -1,12 +1,15 @@
 # Personal settings: device names, selected devices and hardware IDs of this PC
+HushDot.ini
 TrayMute.ini
 
 # Shortcuts and temporary files created at runtime
 *.lnk
+~hd_*
 ~tm_*
 
 # Compiled builds (published as GitHub Release assets, not committed)
 dist/
+HushDot.Sensors.exe
 TrayMute.Sensors.exe
 
 # Backups and OS clutter

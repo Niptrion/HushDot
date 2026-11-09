@@ -1,15 +1,15 @@
-// TrayMute.Sensors - camera activity helper for TrayMute (MIT License).
+// HushDot.Sensors - camera activity helper for HushDot (MIT License).
 //
 // Listens to the Windows sensor activity monitor (Media Foundation,
-// MFCreateSensorActivityMonitor) and tells TrayMute which processes are streaming from a
+// MFCreateSensorActivityMonitor) and tells HushDot which processes are streaming from a
 // camera. AutoHotkey cannot receive these reports itself, because Windows delivers them on
 // worker threads.
 //
 // It never opens a camera, has no network access and writes no files. It sends a WM_COPYDATA
-// message ("CAM|app1.exe,app2.exe") to the TrayMute window whenever the list changes, and exits
+// message ("CAM|app1.exe,app2.exe") to the HushDot window whenever the list changes, and exits
 // when that window is gone.
 //
-// Usage: TrayMute.Sensors.exe <TrayMute window handle, decimal>
+// Usage: HushDot.Sensors.exe <HushDot window handle, decimal>
 // Build: helper\build-helper.cmd (uses the C# compiler included with Windows)
 using System;
 using System.Collections.Generic;
@@ -19,12 +19,12 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
-[assembly: AssemblyTitle("TrayMute.Sensors")]
-[assembly: AssemblyDescription("TrayMute camera activity helper")]
-[assembly: AssemblyProduct("TrayMute")]
-[assembly: AssemblyCopyright("TrayMute fork - MIT License")]
-[assembly: AssemblyVersion("1.4.0.0")]
-[assembly: AssemblyFileVersion("1.4.0.0")]
+[assembly: AssemblyTitle("HushDot.Sensors")]
+[assembly: AssemblyDescription("HushDot camera activity helper")]
+[assembly: AssemblyProduct("HushDot")]
+[assembly: AssemblyCopyright("HushDot fork - MIT License")]
+[assembly: AssemblyVersion("2.0.0.0")]
+[assembly: AssemblyFileVersion("2.0.0.0")]
 
 static class Program
 {
@@ -87,7 +87,7 @@ static class Program
     static IntPtr target;
     static readonly object gate = new object();
     static string pending = "CAM|";   // latest state reported by Windows
-    static string delivered = null;   // latest state TrayMute accepted
+    static string delivered = null;   // latest state HushDot accepted
 
     sealed class Callback : IMFSensorActivitiesReportCallback
     {
@@ -131,8 +131,8 @@ static class Program
         catch { return "PID " + pid; }
     }
 
-    // Sends the latest state if TrayMute has not accepted it yet. Called from the callback and
-    // every second from Main, so a message missed while TrayMute was busy is sent again.
+    // Sends the latest state if HushDot has not accepted it yet. Called from the callback and
+    // every second from Main, so a message missed while HushDot was busy is sent again.
     static void Deliver()
     {
         lock (gate)
@@ -158,7 +158,7 @@ static class Program
     {
         // Windows "N" editions without the Media Feature Pack lack mfplat.dll, and old Windows 10
         // builds lack MFCreateSensorActivityMonitor: exit quietly instead of crashing, and
-        // TrayMute falls back to the Windows privacy records.
+        // HushDot falls back to the Windows privacy records.
         try { return Run(args); }
         catch { return 5; }
     }
@@ -179,7 +179,7 @@ static class Program
             MFShutdown();
             return 4;
         }
-        Deliver();   // tells TrayMute the helper is running, even before the first report
+        Deliver();   // tells HushDot the helper is running, even before the first report
 
         while (IsWindow(target))
         {

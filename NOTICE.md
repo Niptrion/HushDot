@@ -1,11 +1,11 @@
 # NOTICE
 
-**TrayMute is an unofficial fork of [MuteGuard](https://github.com/xionraj/MuteGuard) by xionraj (Raja Mukherjee).**
+**HushDot (formerly TrayMute) is an unofficial fork of [MuteGuard](https://github.com/xionraj/MuteGuard) by xionraj (Raja Mukherjee).**
 It is not affiliated with, maintained by, or endorsed by the original author.
 
 ## Origin of the source code
 
-The TrayMute source was extracted from the compiled MuteGuard **v4.0** release binary.
+The source (first published as TrayMute) was extracted from the compiled MuteGuard **v4.0** release binary.
 `MuteGuard.exe` is an AutoHotkey v2 script compiled with Ahk2Exe, and the script is
 stored as plain text in the PE resource `RCDATA #1`. The script was extracted byte for
 byte, with no decompilation, and then modified as listed below.
@@ -20,6 +20,10 @@ byte, with no decompilation, and then modified as listed below.
 
 - Renamed MuteGuard to TrayMute: app name, window titles, settings file (`TrayMute.ini`),
   `%APPDATA%\TrayMute` folder and startup shortcut (`TrayMute.lnk`).
+- **v2.0: renamed TrayMute to HushDot — Privacy Signals**: script `HushDot.ahk`, settings
+  `HushDot.ini`, `%APPDATA%\HushDot`, startup shortcut `HushDot.lnk`, helper
+  `HushDot.Sensors.exe`, temporary file prefix `~hd_`. On first start HushDot copies TrayMute's
+  settings, replaces its startup shortcut and closes a running TrayMute.
 - Version reset to v1.0, and "Pro" removed from the About page.
 - Temporary write-test file prefix changed from `~mg_` to `~tm_`.
 - Removed the original author's "Donate" and "App Website" buttons.

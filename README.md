@@ -1,11 +1,15 @@
-# TrayMute — One-click microphone mute from the Windows system tray
+# HushDot — Privacy Signals
 
-Windows 11 has no permanent microphone icon in the system tray. The mic indicator appears
-only while an app is using it, and muting means digging through Sound Settings or relying
-on each app's own button. TrayMute adds a fixed microphone icon to the tray. It shows at a
-glance whether your mic is live or muted, and one click toggles it.
+**See which app is using your microphone or camera, and mute them all with one click.**
+*(Formerly TrayMute. See [Upgrading from TrayMute](#upgrading-from-traymute).)*
 
-![TrayMute in the Windows tray: microphone live, microphone muted, microphone in use by an app (orange dot), speaker active and speaker muted, each with its tooltip](docs/tray-states.png)
+Windows 11 shows a microphone or camera indicator only while something uses it, and it rarely
+tells you who. HushDot keeps permanent microphone, speaker and camera icons in the system tray:
+an **orange dot** when any app is using a microphone and a **green dot** when any app is using
+a camera, even while muted, with the app's name when you hover. One click mutes every
+microphone (or speaker) and the next click restores them.
+
+![HushDot in the Windows tray: microphone live, microphone muted, microphone in use by an app (orange dot), speaker active and speaker muted, each with its tooltip](docs/tray-states.png)
 
 
 ## Features
@@ -14,7 +18,7 @@ glance whether your mic is live or muted, and one click toggles it.
   Choose which ones to show in **Settings → Tray Icons** (at least one stays visible).
 - **Camera icon**: click it to open the Windows Camera app. A green dot appears whenever any
   app is using a camera; hover to see which. The camera is detected through the official
-  Windows sensor activity API, by a small companion program (`TrayMute.Sensors.exe`).
+  Windows sensor activity API, by a small companion program (`HushDot.Sensors.exe`).
 
   | Icon | Meaning |
   |---|---|
@@ -54,25 +58,40 @@ glance whether your mic is live or muted, and one click toggles it.
   <img src="docs/menu.png" alt="Right-click menu of the tray icon" width="190">
 </p>
 
+## Upgrading from TrayMute
+
+HushDot is the new name of TrayMute from version 2.0 on. To upgrade, close TrayMute
+(right-click its icon → Exit), extract HushDot into the same folder and start `HushDot.exe`
+(or `HushDot.ahk`). On first start HushDot:
+
+- copies your settings (`TrayMute.ini`, also from `%APPDATA%\TrayMute`) to `HushDot.ini`,
+  including your devices, hotkeys and mute state;
+- replaces TrayMute's "start with Windows" shortcut with its own;
+- closes TrayMute if it is still running.
+
+The old `TrayMute.ini` is left untouched, so you can go back to TrayMute if you want. Once
+HushDot is running you can delete `TrayMute.exe`, `TrayMute.Sensors.exe` (or `TrayMute.ahk`)
+and `TrayMute.ini`.
+
 ## Getting started
 
 Requirements: Windows 11. Choose one of the two options below.
 
 ### Option A: ready-to-run executable (no AutoHotkey needed)
 
-1. **Download** the `TrayMute-v*.zip` file from the [latest release](https://github.com/Niptrion/TrayMute/releases/latest)
-   and extract it to a folder you own (for example `Documents\TrayMute`). Keep `TrayMute.exe`,
-   `TrayMute.Sensors.exe` and the `icons` folder together.
-2. **Run** `TrayMute.exe`. The executable is not code-signed, so Windows SmartScreen may show
+1. **Download** the `HushDot-v*.zip` file from the [latest release](https://github.com/Niptrion/HushDot/releases/latest)
+   and extract it to a folder you own (for example `Documents\HushDot`). Keep `HushDot.exe`,
+   `HushDot.Sensors.exe` and the `icons` folder together.
+2. **Run** `HushDot.exe`. The executable is not code-signed, so Windows SmartScreen may show
    "Windows protected your PC". Choose **More info → Run anyway**.
 3. **Optional: verify the download.** Compare its SHA256 with the one in the release notes:
    ```powershell
-   Get-FileHash .\TrayMute-v1.4.zip -Algorithm SHA256
+   Get-FileHash .\HushDot-v2.0.zip -Algorithm SHA256
    ```
 
-`TrayMute.exe` is this repository's `TrayMute.ahk` compiled with Ahk2Exe. It contains the
+`HushDot.exe` is this repository's `HushDot.ahk` compiled with Ahk2Exe. It contains the
 AutoHotkey v2 interpreter, which is licensed under the GPL v2; see `THIRD-PARTY-NOTICES.md`
-in the zip. `TrayMute.Sensors.exe` is the camera helper built from [`helper/`](helper)
+in the zip. `HushDot.Sensors.exe` is the camera helper built from [`helper/`](helper)
 (MIT License).
 
 ### Option B: run the script with AutoHotkey v2
@@ -81,17 +100,17 @@ in the zip. `TrayMute.Sensors.exe` is the camera helper built from [`helper/`](h
    ```powershell
    winget install --id AutoHotkey.AutoHotkey --exact --source winget
    ```
-2. **Download TrayMute**: clone this repository, or use *Code → Download ZIP* and extract it
-   to a folder you own (for example `Documents\TrayMute`).
-3. **Run it**: double-click `TrayMute.ahk`. The microphone and speaker icons appear in the
+2. **Download HushDot**: clone this repository, or use *Code → Download ZIP* and extract it
+   to a folder you own (for example `Documents\HushDot`).
+3. **Run it**: double-click `HushDot.ahk`. The microphone and speaker icons appear in the
    system tray. If they are hidden, drag them from the `^` overflow area onto the taskbar.
    If double-clicking does nothing (some per-user AutoHotkey installs don't associate `.ahk`
    files), create a shortcut whose target is the interpreter followed by the script, e.g.
-   `"%LOCALAPPDATA%\Programs\AutoHotkey\v2\AutoHotkey64.exe" "C:\path\to\TrayMute.ahk"`.
+   `"%LOCALAPPDATA%\Programs\AutoHotkey\v2\AutoHotkey64.exe" "C:\path\to\HushDot.ahk"`.
 
 ### Using it
 
-TrayMute has no main window. When you start it, a small box above the clock says it is running
+HushDot has no main window. When you start it, a small box above the clock says it is running
 (you can turn it off with *Don't show this again*, and back on in **Settings → System &
 About**). Windows 11
 puts new tray icons behind the **^** arrow next to the clock, so drag them from there onto the
@@ -101,17 +120,17 @@ taskbar. To hide one again, drag it back onto the **^** arrow, or turn it off in
 Left-click the microphone or speaker icon to mute or unmute it, and the camera icon to open
 the Camera app. Right-click any of them for the menu (Settings, Show Controls, Exit).
 
-To start TrayMute with Windows, open **Settings → System & About** and tick
-*Run TrayMute on Windows Startup*. This creates a shortcut in your Startup folder (for the
+To start HushDot with Windows, open **Settings → System & About** and tick
+*Run HushDot on Windows Startup*. This creates a shortcut in your Startup folder (for the
 script version it launches the script through AutoHotkey, so it works even without a `.ahk`
 file association), and unticking the box removes it.
 
-Settings are saved to `TrayMute.ini` next to the program. If that folder is not writable,
-for example inside `Program Files`, they go to `%APPDATA%\TrayMute\` instead.
+Settings are saved to `HushDot.ini` next to the program. If that folder is not writable,
+for example inside `Program Files`, they go to `%APPDATA%\HushDot\` instead.
 
 ### Choosing the right microphone
 
-On first run TrayMute selects the first microphone it finds (in alphabetical order),
+On first run HushDot selects the first microphone it finds (in alphabetical order),
 not necessarily your Windows default. Open **Settings** and pick the microphone you
 actually use.
 
@@ -133,7 +152,7 @@ play it back.
 
 ## What "Mute all" can and cannot do
 
-TrayMute mutes microphones the same way Windows Sound settings do: it turns on the Windows
+HushDot mutes microphones the same way Windows Sound settings do: it turns on the Windows
 mute of every microphone. That silences the microphone for practically every app, but it is
 not an absolute guarantee. Audio can still get through in these cases:
 
@@ -141,23 +160,23 @@ not an absolute guarantee. Audio can still get through in these cases:
   directly, bypassing the Windows audio mixer. Most USB and Bluetooth microphones and webcams
   have no hardware mute, so Windows applies the mute in that mixer, and an exclusive-mode app
   may still receive sound.
-- **Apps that unmute.** Any app can turn a microphone's mute off again. TrayMute notices
+- **Apps that unmute.** Any app can turn a microphone's mute off again. HushDot notices
   within a second and the icon turns red again, but it does not fight the app by re-muting.
 - **Virtual microphones.** Some virtual audio drivers, such as noise-removal apps, ignore the
   Windows mute on their own virtual microphone. Muting the physical microphone they use
   silences them too, and "Mute all" does that.
 - **Software below the Windows audio system.** Malware with administrator rights or its own
-  driver can read the hardware directly, and could also close TrayMute. Only a physical
+  driver can read the hardware directly, and could also close HushDot. Only a physical
   switch, or disabling the device (which needs administrator rights), is absolute.
 
-**What TrayMute does about it: the orange dot.** Whenever any app is using a microphone,
+**What HushDot does about it: the orange dot.** Whenever any app is using a microphone,
 muted or not, the mic icon shows an orange dot in its lower-right corner, like the
 camera and microphone indicator on a phone. Hover over the icon to see which app or program
 it is (for example `In use by: Zoom.exe`). If everything is muted and something still opens a
 microphone, you see it and you know who it is.
 
 The information comes from the records Windows keeps for its own microphone privacy
-indicator, plus the live audio sessions. TrayMute only reads them. Software that bypasses the
+indicator, plus the live audio sessions. HushDot only reads them. Software that bypasses the
 Windows audio system entirely (the last case above) is not visible this way either.
 
 ## Known issues
@@ -167,11 +186,11 @@ Windows audio system entirely (the last case above) is not visible this way eith
   Logitech C922. Unplugging and replugging the webcam (or restarting the PC) brings it back.
   If it happens often, turn off *Mute all microphones* so only your selected microphone is
   toggled.
-- **The camera's green dot needs `TrayMute.Sensors.exe`.** AutoHotkey cannot receive the
+- **The camera's green dot needs `HushDot.Sensors.exe`.** AutoHotkey cannot receive the
   Windows sensor activity reports itself, so a small helper listens to them and passes them
-  on. It never opens a camera, has no network access and closes when TrayMute closes. Without
+  on. It never opens a camera, has no network access and closes when HushDot closes. Without
   it (file missing, blocked by antivirus, or Windows "N" editions without the Media Feature
-  Pack), TrayMute falls back to the per-app records Windows keeps for its privacy indicator,
+  Pack), HushDot falls back to the per-app records Windows keeps for its privacy indicator,
   which recent Windows 11 versions no longer update, so the dot may not appear there. The
   script version (Option B) builds the helper with `helper\build-helper.cmd`, which uses the
   C# compiler included with Windows.
@@ -180,21 +199,21 @@ Windows audio system entirely (the last case above) is not visible this way eith
 
 ## Privacy and safety
 
-- **No telemetry and no network access.** TrayMute never connects to the internet. The only
+- **No telemetry and no network access.** HushDot never connects to the internet. The only
   links (Credits and Sponsor) open in your browser when you click them.
 - **No registry changes, services or background installers.** It writes only its own
-  `TrayMute.ini` and, if you enable it, the startup shortcut.
-- **Muted stays muted.** If you exit TrayMute while all microphones are muted, they stay
-  muted. Start TrayMute again and click the icon to restore them.
-- **Readable source.** TrayMute is a plain-text AutoHotkey script plus a small C# camera
-  helper ([`helper/TrayMute.Sensors.cs`](helper/TrayMute.Sensors.cs)). The original script was
+  `HushDot.ini` and, if you enable it, the startup shortcut.
+- **Muted stays muted.** If you exit HushDot while all microphones are muted, they stay
+  muted. Start HushDot again and click the icon to restore them.
+- **Readable source.** HushDot is a plain-text AutoHotkey script plus a small C# camera
+  helper ([`helper/HushDot.Sensors.cs`](helper/HushDot.Sensors.cs)). The original script was
   reviewed line by line before this fork was published; see [`NOTICE.md`](NOTICE.md) for the
   details and file hashes.
 
 ## Credits and license
 
-TrayMute is an unofficial fork of [**MuteGuard**](https://github.com/xionraj/MuteGuard) by
-xionraj (Raja Mukherjee). All the core functionality is their work. TrayMute is not affiliated
+HushDot (formerly TrayMute) is an unofficial fork of [**MuteGuard**](https://github.com/xionraj/MuteGuard) by
+xionraj (Raja Mukherjee). All the core functionality is their work. HushDot is not affiliated
 with or endorsed by the original author.
 
 Released under the [MIT License](LICENSE), Copyright (c) 2026 Raja Mukherjee.
@@ -202,4 +221,4 @@ See [`NOTICE.md`](NOTICE.md) for where the source came from and what changed.
 
 ---
 
-💖 Like TrayMute? [Sponsor this fork on GitHub](https://github.com/sponsors/Niptrion).
+💖 Like HushDot? [Sponsor this fork on GitHub](https://github.com/sponsors/Niptrion).

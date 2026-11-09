@@ -1,5 +1,5 @@
 @echo off
-rem Builds TrayMute.Sensors.exe (camera activity helper) next to TrayMute.ahk, using the
+rem Builds HushDot.Sensors.exe (camera activity helper) next to HushDot.ahk, using the
 rem C# compiler that ships with Windows (.NET Framework 4.x). Nothing needs to be installed.
 rem Usage: helper\build-helper.cmd [output folder]
 setlocal
@@ -14,5 +14,5 @@ set "OUT=%~1"
 if "%OUT%"=="" set "OUT=%HERE%.."
 "%CSC%" /nologo /target:winexe /optimize+ /platform:anycpu ^
   /win32icon:"%HERE%..\icons\app.ico" ^
-  /out:"%OUT%\TrayMute.Sensors.exe" "%HERE%TrayMute.Sensors.cs"
+  /out:"%OUT%\HushDot.Sensors.exe" "%HERE%HushDot.Sensors.cs"
 exit /b %ERRORLEVEL%
