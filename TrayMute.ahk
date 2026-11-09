@@ -3,7 +3,7 @@
 #SingleInstance Force
 ;@Ahk2Exe-SetName TrayMute
 ;@Ahk2Exe-SetDescription TrayMute - mute microphones and speakers from the system tray
-;@Ahk2Exe-SetVersion 1.3.0
+;@Ahk2Exe-SetVersion 1.3.1
 ;@Ahk2Exe-SetCopyright Copyright (c) 2026 Raja Mukherjee (MuteGuard). TrayMute fork - MIT License.
 ;@Ahk2Exe-SetMainIcon icons\app.ico
 #UseHook true
@@ -79,6 +79,8 @@ static RecreateTrayTimer := ""
 static ShowTrayMic   := true
 static ShowTraySpk   := true
 static ShowTrayCam   := true
+; "TrayMute is running" box when started by hand (can be turned off).
+static ShowStartupBox := true
 ; Camera indicator: apps using a camera, and whether the Windows Camera app is open.
 static CamUsers      := []
 static CamAppOpen    := false
@@ -92,7 +94,7 @@ static PendingRefreshTimer  := ""
 static IniPath  := ""
 static AppName  := "TrayMute"
 ; Shown in the tray menu, Settings and About. Keep ;@Ahk2Exe-SetVersion at the top in sync.
-static Version  := "1.3"
+static Version  := "1.3.1"
 static SettingsSavedLbl := ""
 static ThemeBg      := ""
 static ThemeCard    := ""
@@ -169,7 +171,7 @@ try this.ApplyStartup(true)
 ; Started by hand: there is no window, and new tray icons start hidden behind the ^ arrow,
 ; so say where TrayMute is. Not shown when Windows starts it.
 if !autostart
-SetTimer(() => MicController.Notify("TrayMute is running. Its icons are in the system tray next to the clock. If you don't see them, click the ^ arrow and drag them onto the taskbar.", MicController.AppName, "Iconi"), -1500)
+SetTimer(() => MicController.ShowStartupNotice(), -1200)
 }
 static DetermineIniPath() {
 localIni := A_ScriptDir "\TrayMute.ini"
@@ -289,6 +291,7 @@ this.MuteAllSpeakers      := IniRead(this.IniPath, "Settings", "MuteAllSpeakers"
 this.ShowTrayMic          := IniRead(this.IniPath, "Settings", "TrayMic",          "1") = "1"
 this.ShowTraySpk          := IniRead(this.IniPath, "Settings", "TraySpk",          "1") = "1"
 this.ShowTrayCam          := IniRead(this.IniPath, "Settings", "TrayCam",          "1") = "1"
+this.ShowStartupBox       := IniRead(this.IniPath, "Settings", "StartupNotice",    "1") = "1"
 if (this.VisibleTrayIconCount() = 0)        ; never leave the app without any tray icon
 this.ShowTrayMic := true
 this.LoadGroupState(this.MicAll)
@@ -334,6 +337,7 @@ IniWrite(this.MuteAllSpeakers ? "1" : "0",  this.IniPath, "Settings", "MuteAllSp
 IniWrite(this.ShowTrayMic ? "1" : "0",      this.IniPath, "Settings", "TrayMic")
 IniWrite(this.ShowTraySpk ? "1" : "0",      this.IniPath, "Settings", "TraySpk")
 IniWrite(this.ShowTrayCam ? "1" : "0",      this.IniPath, "Settings", "TrayCam")
+IniWrite(this.ShowStartupBox ? "1" : "0",   this.IniPath, "Settings", "StartupNotice")
 IniWrite(this.CurrentMicName,          this.IniPath, "Settings", "SelectedMic")
 IniWrite(this.CurrentSpeakerName,      this.IniPath, "Settings", "SelectedSpk")
 IniWrite(this.MiniWindowSavedX,        this.IniPath, "Settings", "MiniWindowX")
@@ -366,6 +370,7 @@ IniWrite(this.MuteAllSpeakers ? "1" : "0",  this.IniPath, "Settings", "MuteAllSp
 IniWrite(this.ShowTrayMic ? "1" : "0",      this.IniPath, "Settings", "TrayMic")
 IniWrite(this.ShowTraySpk ? "1" : "0",      this.IniPath, "Settings", "TraySpk")
 IniWrite(this.ShowTrayCam ? "1" : "0",      this.IniPath, "Settings", "TrayCam")
+IniWrite(this.ShowStartupBox ? "1" : "0",   this.IniPath, "Settings", "StartupNotice")
 IniWrite(this.CurrentMicName,          this.IniPath, "Settings", "SelectedMic")
 IniWrite(this.CurrentSpeakerName,      this.IniPath, "Settings", "SelectedSpk")
 IniWrite(this.MiniWindowSavedX,        this.IniPath, "Settings", "MiniWindowX")
@@ -1223,10 +1228,58 @@ Run("microsoft.windows.camera:")
 MicController.Notify("Could not open the Windows Camera app (" e.Message ").", this.AppName, "Icon!")
 }
 }
+; Windows notifications can be turned off (Settings > System > Notifications); TrayTip is then
+; silently dropped.
+static ToastsEnabled() {
+try return RegRead("HKCU\Software\Microsoft\Windows\CurrentVersion\PushNotifications", "ToastEnabled", 1) != 0
+return true
+}
+; "TrayMute is running" box above the clock, shown when TrayMute is started by hand: there is no
+; main window and new tray icons start hidden behind the ^ arrow. A window of its own, because
+; Windows notifications may be off. Closes on OK, Esc or after 15 s, without taking the focus.
+static ShowStartupNotice() {
+if !this.ShowStartupBox
+return
+bg  := this.DarkMode ? "2B2B2B" : "FFFFFF"
+fg  := this.DarkMode ? "FFFFFF" : "1A1A1A"
+sub := this.DarkMode ? "C8C8C8" : "5E5E5E"
+g := Gui("+AlwaysOnTop -Caption +ToolWindow +Border", this.AppName)
+g.BackColor := bg
+g.MarginX := 18, g.MarginY := 16
+appIcon := A_IsCompiled ? A_ScriptFullPath : A_ScriptDir "\icons\app.ico"
+try g.Add("Picture", "w32 h32 Icon1", appIcon)
+g.SetFont("s11 bold c" fg, "Segoe UI")
+g.Add("Text", "x+12 yp+6 w300", "TrayMute is running")
+g.SetFont("s9 norm c" sub, "Segoe UI")
+g.Add("Text", "xm y+16 w344", "Its icons are in the system tray, next to the clock. If you don't see them, click the ^ arrow there and drag them onto the taskbar.")
+chk := g.Add("CheckBox", "xm y+14 w230 c" sub, "Don't show this again")
+btn := g.Add("Button", "x+14 yp-5 w100 h28 Default", "OK")
+closed := false
+CloseNotice(*) {
+if closed
+return
+closed := true
+if chk.Value {
+this.ShowStartupBox := false
+this.SaveSettings()
+}
+try g.Destroy()
+}
+btn.OnEvent("Click", CloseNotice)
+g.OnEvent("Escape", CloseNotice)
+g.OnEvent("Close", CloseNotice)
+g.Show("Hide AutoSize")
+g.GetPos(, , &w, &h)
+MonitorGetWorkArea(MonitorGetPrimary(), &left, &top, &right, &bottom)
+try DllCall("dwmapi\DwmSetWindowAttribute", "Ptr", g.Hwnd, "Int", 33, "Int*", 2, "Int", 4)  ; rounded corners (Windows 11)
+g.Show("NoActivate x" (right - w - 12) " y" (bottom - h - 12))
+SetTimer(CloseNotice, -15000)
+}
 ; TrayTip goes through AutoHotkey's own tray icon (the microphone). When that icon is hidden,
-; show the message as a tooltip near the mouse instead, so errors are never silent.
+; or Windows notifications are off, show the message as a tooltip near the mouse instead, so
+; errors are never silent.
 static Notify(text, title, options := "") {
-if this.ShowTrayMic {
+if (this.ShowTrayMic && this.ToastsEnabled()) {
 TrayTip(text, title, options)
 return
 }
@@ -2159,7 +2212,7 @@ pages[5].Push(g.Add("Text", "x240 y18 w560 c1A1A1A 0x80", "System & About"))
 g.SetFont("s9", "Segoe UI")
 pages[5].Push(g.Add("Text", "x240 y44 w560 c5E5E5E", "Manage startup settings and application information"))
 pages[5].Push(g.Add("GroupBox", "x240 y75 w560 h130", "  System Integration  "))
-chkStart := g.Add("CheckBox", "x256 y105 w300 c1A1A1A", "Run TrayMute on Windows Startup")
+chkStart := g.Add("CheckBox", "x256 y100 w300 c1A1A1A", "Run TrayMute on Windows Startup")
 chkStart.Value := this.RunOnStart ? 1 : 0
 pages[5].Push(chkStart)
 OnInstantStartupToggle() {
@@ -2169,7 +2222,11 @@ this.SaveSettings()
 this.NotifySettingsSaved()
 }
 chkStart.OnEvent("Click", (*) => OnInstantStartupToggle())
-btnSponsor := g.Add("Button", "x256 y145 w160 h32", "💖 Sponsor")
+chkNotice := g.Add("CheckBox", "x256 y124 w520 c1A1A1A", "Show " Chr(34) "TrayMute is running" Chr(34) " when TrayMute is started by hand")
+chkNotice.Value := this.ShowStartupBox ? 1 : 0
+pages[5].Push(chkNotice)
+chkNotice.OnEvent("Click", (*) => (this.ShowStartupBox := chkNotice.Value = 1, this.SaveSettings(), this.NotifySettingsSaved()))
+btnSponsor := g.Add("Button", "x256 y156 w160 h32", "💖 Sponsor")
 btnSponsor.OnEvent("Click", (*) => Run("https://github.com/sponsors/Niptrion"))
 pages[5].Push(btnSponsor)
 pages[5].Push(g.Add("GroupBox", "x240 y210 w560 h280", "  About TrayMute  "))

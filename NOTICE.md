@@ -56,8 +56,10 @@ byte, with no decompilation, and then modified as listed below.
 - Added a choice of which tray icons to show (microphone, speaker, camera; at least one).
   The speaker and camera icons now share one tray-icon helper, which also restores them after
   Explorer restarts. Messages fall back to a tooltip when the microphone icon is hidden.
-- A notification says TrayMute is running when it is started by hand (not when Windows
-  starts it, which the startup shortcut marks with `--autostart`).
+- A small "TrayMute is running" box above the clock appears when TrayMute is started by hand
+  (not when Windows starts it, which the startup shortcut marks with `--autostart`). It is a
+  window of its own because Windows notifications may be turned off; it can be disabled.
+  Error messages also fall back to a tooltip when Windows notifications are off.
 - Picking a speaker now also makes it the Windows default output (console and multimedia
   roles; the communication device used for calls is left alone). The original
   only changed which device the mute button controlled, although the option was labelled

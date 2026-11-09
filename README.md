@@ -61,7 +61,7 @@ Requirements: Windows 11. Choose one of the two options below.
    "Windows protected your PC". Choose **More info → Run anyway**.
 3. **Optional: verify the download.** Compare its SHA256 with the one in the release notes:
    ```powershell
-   Get-FileHash .\TrayMute-v1.3.zip -Algorithm SHA256
+   Get-FileHash .\TrayMute-v1.3.1.zip -Algorithm SHA256
    ```
 
 `TrayMute.exe` is this repository's `TrayMute.ahk` compiled with Ahk2Exe. It contains the
@@ -84,7 +84,9 @@ in the zip.
 
 ### Using it
 
-TrayMute has no main window. When you start it, a notification says it is running. Windows 11
+TrayMute has no main window. When you start it, a small box above the clock says it is running
+(you can turn it off with *Don't show this again*, and back on in **Settings → System &
+About**). Windows 11
 puts new tray icons behind the **^** arrow next to the clock, so drag them from there onto the
 taskbar. To hide one again, drag it back onto the **^** arrow, or turn it off in Windows
 **Settings → Personalization → Taskbar → Other system tray icons**.
