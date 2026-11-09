@@ -3,7 +3,7 @@
 #SingleInstance Force
 ;@Ahk2Exe-SetName TrayMute
 ;@Ahk2Exe-SetDescription TrayMute - mute microphones and speakers from the system tray
-;@Ahk2Exe-SetVersion 1.3.1
+;@Ahk2Exe-SetVersion 1.4.0
 ;@Ahk2Exe-SetCopyright Copyright (c) 2026 Raja Mukherjee (MuteGuard). TrayMute fork - MIT License.
 ;@Ahk2Exe-SetMainIcon icons\app.ico
 #UseHook true
@@ -84,6 +84,11 @@ static ShowStartupBox := true
 ; Camera indicator: apps using a camera, and whether the Windows Camera app is open.
 static CamUsers      := []
 static CamAppOpen    := false
+; Camera helper (TrayMute.Sensors.exe): live camera users from the Windows sensor activity API.
+static SensorHelperPid      := 0
+static SensorHelperRestarts := 0
+static CamHelperActive      := false
+static CamHelperUsers       := []
 static IconTheme     := "light"
 static SettingsDdMic        := ""
 static SettingsDdSpk        := ""
@@ -94,7 +99,7 @@ static PendingRefreshTimer  := ""
 static IniPath  := ""
 static AppName  := "TrayMute"
 ; Shown in the tray menu, Settings and About. Keep ;@Ahk2Exe-SetVersion at the top in sync.
-static Version  := "1.3.1"
+static Version  := "1.4"
 static SettingsSavedLbl := ""
 static ThemeBg      := ""
 static ThemeCard    := ""
@@ -154,6 +159,9 @@ this.ShowMiniWindow()
 SetTimer((*) => this.UpdateState(), 1000)
 SetTimer((*) => MicController.CheckUsageIndicators(), 2000)
 this.SetupSpeakerTray()
+OnMessage(0x004A, ObjBindMethod(this, "OnCopyData"))       ; WM_COPYDATA from the camera helper
+if this.ShowTrayCam
+this.StartSensorHelper()
 try this.RefreshCamUsers()
 this.SetupCameraTray()
 OnMessage(DllCall("RegisterWindowMessage", "Str", "TaskbarCreated", "UInt"), (*) => MicController.OnTaskbarCreated())
@@ -773,6 +781,7 @@ MicController.Notify("Mic Error: " e.Message, this.AppName, "Icon!")
 ; Runs every 2 s. Refreshes the icon right away when the set of apps changes.
 static CheckUsageIndicators() {
 micChanged := false, camChanged := false
+try this.CheckSensorHelper()
 try micChanged := this.RefreshMicUsers()
 if this.ShowTrayCam
 try camChanged := this.RefreshCamUsers()
@@ -800,19 +809,90 @@ changed := this.JoinNames(list) != this.JoinNames(this.MicUsers)
 this.MicUsers := list
 return changed
 }
-; Returns true when the camera users or the Camera app state changed.
+; Returns true when the camera users or the Camera app state changed. The helper's live list is
+; used when it is running; otherwise the Windows privacy records (which recent Windows 11
+; versions no longer update).
 static RefreshCamUsers() {
+Critical                                ; not interrupted by a helper message halfway through
+if this.CamHelperActive {
+list := this.CamHelperUsers
+} else {
 found := Map()
 found.CaseSense := "Off"
 this.CollectCapabilityUsers("webcam", found)
 list := []
 for name in found
 list.Push(name)
+}
 appOpen := ProcessExist("WindowsCamera.exe") != 0
 changed := appOpen != this.CamAppOpen || this.JoinNames(list) != this.JoinNames(this.CamUsers)
 this.CamUsers := list
 this.CamAppOpen := appOpen
 return changed
+}
+; ---- Camera helper (TrayMute.Sensors.exe) --------------------------------------------
+; Starts the helper, which reports camera users through the Windows sensor activity API.
+; Without it (file missing or blocked) the camera falls back to the privacy records.
+static StartSensorHelper() {
+if (this.SensorHelperPid && ProcessExist(this.SensorHelperPid))
+return
+helper := A_ScriptDir "\TrayMute.Sensors.exe"
+if !FileExist(helper)
+return
+try {
+Run('"' helper '" ' A_ScriptHwnd, A_ScriptDir, "Hide", &pid)
+this.SensorHelperPid := pid
+}
+}
+static StopSensorHelper() {
+pid := this.SensorHelperPid
+this.SensorHelperPid := 0
+this.CamHelperActive := false
+this.CamHelperUsers := []
+; Only close it if that PID still belongs to the helper (PIDs are reused).
+if (pid && ProcessExist(pid)) {
+try {
+if (ProcessGetName(pid) = "TrayMute.Sensors.exe")
+ProcessClose(pid)
+}
+}
+}
+; Called every 2 s: if the helper died, fall back to the privacy records and restart it a
+; few times.
+static CheckSensorHelper() {
+if (!this.ShowTrayCam || !this.SensorHelperPid || ProcessExist(this.SensorHelperPid))
+return
+this.SensorHelperPid := 0
+this.CamHelperActive := false
+this.CamHelperUsers := []
+if (this.SensorHelperRestarts < 3) {
+this.SensorHelperRestarts += 1
+this.StartSensorHelper()
+}
+}
+; WM_COPYDATA "CAM|app1.exe,app2.exe" from the helper, sent whenever the list changes.
+; Only accepted while our own helper is running, so another program cannot switch off the
+; fallback with a fake message. Reads exactly cbData bytes.
+static OnCopyData(wParam, lParam, msg, hwnd) {
+if (hwnd != A_ScriptHwnd || !this.SensorHelperPid || NumGet(lParam, 0, "UPtr") != 0x544D)
+return
+size := NumGet(lParam, A_PtrSize, "UInt")
+if (size < 8 || size > 65536)
+return
+text := RTrim(StrGet(NumGet(lParam, A_PtrSize * 2, "Ptr"), size // 2, "UTF-16"), Chr(0))
+if (SubStr(text, 1, 4) != "CAM|")
+return
+this.SensorHelperRestarts := 0          ; the helper is healthy
+list := []
+for name in StrSplit(SubStr(text, 5), ",") {
+if (name != "")
+list.Push(this.FriendlyAppName(name))
+}
+this.CamHelperUsers := list
+this.CamHelperActive := true
+if this.RefreshCamUsers()
+this.UpdateCameraTrayIcon()
+return true
 }
 ; capability: "microphone" or "webcam" (Windows privacy records, read-only).
 static CollectCapabilityUsers(capability, found) {
@@ -824,7 +904,7 @@ this.CollectConsentUsers(root, base "\NonPackaged", found)
 }
 ; Readable names for a few Store apps; drops the numeric publisher prefix of others.
 static FriendlyAppName(name) {
-static known := Map("Microsoft.WindowsCamera", "Windows Camera", "MSTeams", "Microsoft Teams")
+static known := Map("Microsoft.WindowsCamera", "Windows Camera", "WindowsCamera.exe", "Windows Camera", "MSTeams", "Microsoft Teams")
 if known.Has(name)
 return known[name]
 return RegExReplace(name, "^[0-9A-F]{8}\.")
@@ -1300,8 +1380,13 @@ this.ShowTraySpk := visible
 this.UpdateSpeakerTrayIcon()
 case "cam":
 this.ShowTrayCam := visible
-if visible
+if visible {
+this.SensorHelperRestarts := 0
+this.StartSensorHelper()
 try this.RefreshCamUsers()
+} else {
+this.StopSensorHelper()
+}
 this.UpdateCameraTrayIcon()
 }
 }
@@ -1319,6 +1404,7 @@ t.Recreate()
 }
 }
 static OnExitHandler(*) {
+try this.StopSensorHelper()
 for t in [this.SpkTray, this.CamTray] {
 if (t != "")
 try t.Hide()

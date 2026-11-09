@@ -1,4 +1,5 @@
 # Keep the script and docs with LF line endings on every platform
 * text=auto eol=lf
+*.cmd text eol=crlf
 *.ico binary
 *.png binary

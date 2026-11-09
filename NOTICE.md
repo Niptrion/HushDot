@@ -51,8 +51,12 @@ byte, with no decompilation, and then modified as listed below.
   names in the tooltip. It reads the Windows microphone privacy records (read-only registry
   access) and the active capture sessions.
 - Added a camera tray icon (new `cam_*.ico` icons, MIT License): it opens the Windows Camera
-  app, turns violet while that app is open and shows a green dot when the Windows camera
-  privacy records report an app using a camera.
+  app, turns violet while that app is open and shows a green dot when an app is using a
+  camera. Camera use is detected through the Windows sensor activity API
+  (`MFCreateSensorActivityMonitor`) by a new companion program, `TrayMute.Sensors.exe`
+  (source in `helper/`, MIT License, built with the C# compiler included with Windows), which
+  reports to TrayMute via `WM_COPYDATA`. Without it, TrayMute falls back to the Windows
+  camera privacy records.
 - Added a choice of which tray icons to show (microphone, speaker, camera; at least one).
   The speaker and camera icons now share one tray-icon helper, which also restores them after
   Explorer restarts. Messages fall back to a tooltip when the microphone icon is hidden.

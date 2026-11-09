@@ -12,9 +12,15 @@ glance whether your mic is live or muted, and one click toggles it.
 
 - **Permanent tray icons** for the microphone, the speaker and the camera, showing their status.
   Choose which ones to show in **Settings → Tray Icons** (at least one stays visible).
-- **Camera icon**: click it to open the Windows Camera app. It is grey when no app is using a
-  camera and violet while the Camera app is open. A green dot (where Windows provides the
-  data, see Known issues) shows that an app is using a camera; hover to see which.
+- **Camera icon**: click it to open the Windows Camera app. A green dot appears whenever any
+  app is using a camera; hover to see which. The camera is detected through the official
+  Windows sensor activity API, by a small companion program (`TrayMute.Sensors.exe`).
+
+  | Icon | Meaning |
+  |---|---|
+  | Grey camera | No app is using a camera |
+  | Violet camera + green dot | The Windows Camera app is open (its preview already uses the camera) |
+  | **Grey camera + green dot** | **Another app is using a camera**: a call, or something you did not expect |
 - **One-click mute**: left-click the tray icon to toggle the mic (or the speaker)
 - **Mute every microphone at once** (on by default): one click silences all audio inputs,
   including virtual ones such as NVIDIA RTX Voice and microphones plugged in while muted.
@@ -55,18 +61,19 @@ Requirements: Windows 11. Choose one of the two options below.
 ### Option A: ready-to-run executable (no AutoHotkey needed)
 
 1. **Download** the `TrayMute-v*.zip` file from the [latest release](https://github.com/Niptrion/TrayMute/releases/latest)
-   and extract it to a folder you own (for example `Documents\TrayMute`). Keep `TrayMute.exe`
-   and the `icons` folder together.
+   and extract it to a folder you own (for example `Documents\TrayMute`). Keep `TrayMute.exe`,
+   `TrayMute.Sensors.exe` and the `icons` folder together.
 2. **Run** `TrayMute.exe`. The executable is not code-signed, so Windows SmartScreen may show
    "Windows protected your PC". Choose **More info → Run anyway**.
 3. **Optional: verify the download.** Compare its SHA256 with the one in the release notes:
    ```powershell
-   Get-FileHash .\TrayMute-v1.3.1.zip -Algorithm SHA256
+   Get-FileHash .\TrayMute-v1.4.zip -Algorithm SHA256
    ```
 
 `TrayMute.exe` is this repository's `TrayMute.ahk` compiled with Ahk2Exe. It contains the
 AutoHotkey v2 interpreter, which is licensed under the GPL v2; see `THIRD-PARTY-NOTICES.md`
-in the zip.
+in the zip. `TrayMute.Sensors.exe` is the camera helper built from [`helper/`](helper)
+(MIT License).
 
 ### Option B: run the script with AutoHotkey v2
 
@@ -160,12 +167,14 @@ Windows audio system entirely (the last case above) is not visible this way eith
   Logitech C922. Unplugging and replugging the webcam (or restarting the PC) brings it back.
   If it happens often, turn off *Mute all microphones* so only your selected microphone is
   toggled.
-- **The camera's green dot may not appear on current Windows 11 versions.** TrayMute reads
-  the per-app camera usage records that Windows keeps for its privacy indicator, and recent
-  Windows 11 versions no longer update those records. The camera icon still opens the Camera
-  app and turns violet while it is open, and Windows' own camera indicator in the tray (and
-  your webcam's light, if it has one) still shows when a camera is in use. Microphone
-  detection is not affected, because it also uses the live audio sessions.
+- **The camera's green dot needs `TrayMute.Sensors.exe`.** AutoHotkey cannot receive the
+  Windows sensor activity reports itself, so a small helper listens to them and passes them
+  on. It never opens a camera, has no network access and closes when TrayMute closes. Without
+  it (file missing, blocked by antivirus, or Windows "N" editions without the Media Feature
+  Pack), TrayMute falls back to the per-app records Windows keeps for its privacy indicator,
+  which recent Windows 11 versions no longer update, so the dot may not appear there. The
+  script version (Option B) builds the helper with `helper\build-helper.cmd`, which uses the
+  C# compiler included with Windows.
 - **"Mute all speakers" also mutes virtual outputs** such as VB-Cable or Voicemeeter, which
   silences anything you stream or record through them. If you use those, turn the option off.
 
@@ -177,7 +186,8 @@ Windows audio system entirely (the last case above) is not visible this way eith
   `TrayMute.ini` and, if you enable it, the startup shortcut.
 - **Muted stays muted.** If you exit TrayMute while all microphones are muted, they stay
   muted. Start TrayMute again and click the icon to restore them.
-- **Readable source.** TrayMute is a single plain-text AutoHotkey script. The full script was
+- **Readable source.** TrayMute is a plain-text AutoHotkey script plus a small C# camera
+  helper ([`helper/TrayMute.Sensors.cs`](helper/TrayMute.Sensors.cs)). The original script was
   reviewed line by line before this fork was published; see [`NOTICE.md`](NOTICE.md) for the
   details and file hashes.
 
