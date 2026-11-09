@@ -5,8 +5,7 @@ only while an app is using it, and muting means digging through Sound Settings o
 on each app's own button. TrayMute adds a fixed microphone icon to the tray. It shows at a
 glance whether your mic is live or muted, and one click toggles it.
 
-<!-- TODO: add a screenshot or GIF of the tray icons and the settings window, then use:
-![TrayMute in the Windows system tray](docs/screenshot.png) -->
+![TrayMute in the Windows tray: microphone live, microphone muted, microphone in use by an app (orange dot), speaker active and speaker muted, each with its tooltip](docs/tray-states.png)
 
 
 ## Features
@@ -33,6 +32,17 @@ glance whether your mic is live or muted, and one click toggles it.
   language are listed correctly.
 - **Custom tray icons** picked from any `.ico`, `.exe` or `.dll`
 - **Optional start with Windows**, off by default
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/settings.png" alt="Settings window, Audio Devices page: microphone and output device, with the Mute all microphones and Mute all speakers options" width="560">
+  &nbsp;
+  <img src="docs/controls.png" alt="Show Controls window with microphone and speaker status and mute buttons" width="270">
+</p>
+<p align="center">
+  <img src="docs/menu.png" alt="Right-click menu of the tray icon" width="190">
+</p>
 
 ## Getting started
 
