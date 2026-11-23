@@ -3,11 +3,14 @@
 #SingleInstance Force
 ;@Ahk2Exe-SetName HushDot
 ;@Ahk2Exe-SetDescription HushDot - Privacy Signals: see which app uses your mic or camera
-;@Ahk2Exe-SetVersion 2.0.0
+;@Ahk2Exe-SetVersion 2.1.0
 ;@Ahk2Exe-SetCopyright Copyright (c) 2026 Raja Mukherjee (MuteGuard). HushDot (formerly TrayMute) fork - MIT License.
 ;@Ahk2Exe-SetMainIcon icons\app.ico
 #UseHook true
 Persistent
+#Include %A_ScriptDir%\lib\I18n.ahk
+#Include %A_ScriptDir%\lib\GoogleTranslate.ahk
+#Include %A_ScriptDir%\lib\LanguageDialog.ahk
 class MicController {
 static AvailableMics    := Map()
 static CurrentMicName   := ""
@@ -81,6 +84,8 @@ static ShowTraySpk   := true
 static ShowTrayCam   := true
 ; "HushDot is running" box when started by hand (can be turned off).
 static ShowStartupBox := true
+; Interface language code ("en" = built-in English, otherwise lang\<code>.ini).
+static Language := "en"
 ; Camera indicator: apps using a camera, and whether the Windows Camera app is open.
 static CamUsers      := []
 static CamAppOpen    := false
@@ -94,12 +99,16 @@ static SettingsDdMic        := ""
 static SettingsDdSpk        := ""
 static SettingsLblMicStatus := ""
 static SettingsLblSpkStatus := ""
+static SettingsLblMicPick    := ""
+; Settings page shown, and the function that closes the window (used when the language changes).
+static SettingsPage         := 1
+static CloseSettingsFn      := ""
 static DeviceCheckCounter   := 0
 static PendingRefreshTimer  := ""
 static IniPath  := ""
 static AppName  := "HushDot"
 ; Shown in the tray menu, Settings and About. Keep ;@Ahk2Exe-SetVersion at the top in sync.
-static Version  := "2.0"
+static Version  := "2.1"
 static SettingsSavedLbl := ""
 static ThemeBg      := ""
 static ThemeCard    := ""
@@ -151,6 +160,9 @@ if replacedTrayMuteStartup {
 this.RunOnStart := true                 ; TrayMute started with Windows, so HushDot does too
 this.SaveSettings()
 }
+I18n.Load(this.Language)
+this.Language := I18n.Code
+try I18n.EnsureEnglishFile()
 A_IconHidden := !this.ShowTrayMic
 this.ApplyTheme()
 this.EnumerateDevices()
@@ -171,6 +183,7 @@ try this.RefreshCamUsers()
 this.SetupCameraTray()
 OnMessage(DllCall("RegisterWindowMessage", "Str", "TaskbarCreated", "UInt"), (*) => MicController.OnTaskbarCreated())
 OnMessage(0x0219, (wp, lp, *) => MicController.OnDeviceChangeMsg(wp, lp))
+OnMessage(0x0404, ObjBindMethod(this, "OnMicTrayNotify"))   ; AHK_NOTIFYICON: the microphone icon
 this.ExitHandler := ObjBindMethod(this, "OnExitHandler")
 OnExit((*) => MicController.OnExitHandler())
 ; The startup shortcut passes --autostart. Refresh it so shortcuts made by older versions get it.
@@ -325,14 +338,14 @@ return path
 static NotifySettingsSaved() {
 if (this.SettingsSavedLbl != "") {
 try {
-this.SettingsSavedLbl.Value := "✓ Saved (" FormatTime(A_Now, "HH:mm:ss") ")"
+this.SettingsSavedLbl.Value := T("settings.saved", FormatTime(A_Now, "HH:mm:ss"))
 SetTimer(() => this.ResetSettingsSavedLbl(), -3000)
 }
 }
 }
 static ResetSettingsSavedLbl() {
 if (this.SettingsSavedLbl != "") {
-try this.SettingsSavedLbl.Value := "✓ All changes save instantly"
+try this.SettingsSavedLbl.Value := T("settings.autoSave")
 }
 }
 static LoadSettings() {
@@ -371,6 +384,7 @@ this.ShowTrayMic          := IniRead(this.IniPath, "Settings", "TrayMic",       
 this.ShowTraySpk          := IniRead(this.IniPath, "Settings", "TraySpk",          "1") = "1"
 this.ShowTrayCam          := IniRead(this.IniPath, "Settings", "TrayCam",          "1") = "1"
 this.ShowStartupBox       := IniRead(this.IniPath, "Settings", "StartupNotice",    "1") = "1"
+this.Language             := IniRead(this.IniPath, "Settings", "Language",         "en")
 if (this.VisibleTrayIconCount() = 0)        ; never leave the app without any tray icon
 this.ShowTrayMic := true
 this.LoadGroupState(this.MicAll)
@@ -389,76 +403,48 @@ static SaveSettings() {
 if (this.IniPath = "" || !this.TestFileWrite(this.IniPath)) {
 this.IniPath := this.DetermineIniPath()
 }
-writeUnmuted := this.GetRelativeIconPath(this.IconPathUnmuted)
-writeMuted   := this.GetRelativeIconPath(this.IconPathMuted)
-writeSpkOn   := this.GetRelativeIconPath(this.SpkIconPathOn)
-writeSpkOff  := this.GetRelativeIconPath(this.SpkIconPathOff)
 try {
-IniWrite(writeUnmuted, this.IniPath, "Icons", "UnmutedPath")
-IniWrite(this.IconIdxUnmuted,  this.IniPath, "Icons", "UnmutedIndex")
-IniWrite(writeMuted,   this.IniPath, "Icons", "MutedPath")
-IniWrite(this.IconIdxMuted,    this.IniPath, "Icons", "MutedIndex")
-IniWrite(writeSpkOn,   this.IniPath, "SpkIcons", "OnPath")
-IniWrite(this.SpkIconIdxOn,    this.IniPath, "SpkIcons", "OnIndex")
-IniWrite(writeSpkOff,  this.IniPath, "SpkIcons", "OffPath")
-IniWrite(this.SpkIconIdxOff,   this.IniPath, "SpkIcons", "OffIndex")
-IniWrite(this.MicShortcutKey,      this.IniPath, "Settings", "MicShortcutKey")
-IniWrite(this.SpkShortcutKey,      this.IniPath, "Settings", "SpkShortcutKey")
-IniWrite(this.EnableMiniWindow ? "1" : "0", this.IniPath, "Settings", "MiniWindow")
-IniWrite(this.DarkMode ? "1" : "0",         this.IniPath, "Settings", "DarkMode")
-IniWrite(this.MiniWindowSize,       this.IniPath, "Settings", "MiniWindowSize")
-IniWrite(this.MiniWindowBorder ? "1" : "0", this.IniPath, "Settings", "MiniWindowBorder")
-IniWrite(this.ShowMiniMicIcon ? "1" : "0",  this.IniPath, "Settings", "ShowMicIcon")
-IniWrite(this.ShowMiniSpkIcon ? "1" : "0",  this.IniPath, "Settings", "ShowSpkIcon")
-IniWrite(this.RunOnStart ? "1" : "0",       this.IniPath, "Settings", "RunOnStart")
-IniWrite(this.MuteAllMics ? "1" : "0",      this.IniPath, "Settings", "MuteAllMics")
-IniWrite(this.MuteAllSpeakers ? "1" : "0",  this.IniPath, "Settings", "MuteAllSpeakers")
-IniWrite(this.ShowTrayMic ? "1" : "0",      this.IniPath, "Settings", "TrayMic")
-IniWrite(this.ShowTraySpk ? "1" : "0",      this.IniPath, "Settings", "TraySpk")
-IniWrite(this.ShowTrayCam ? "1" : "0",      this.IniPath, "Settings", "TrayCam")
-IniWrite(this.ShowStartupBox ? "1" : "0",   this.IniPath, "Settings", "StartupNotice")
-IniWrite(this.CurrentMicName,          this.IniPath, "Settings", "SelectedMic")
-IniWrite(this.CurrentSpeakerName,      this.IniPath, "Settings", "SelectedSpk")
-IniWrite(this.MiniWindowSavedX,        this.IniPath, "Settings", "MiniWindowX")
-IniWrite(this.MiniWindowSavedY,        this.IniPath, "Settings", "MiniWindowY")
-} catch as e {
+this.WriteSettings(this.IniPath)
+} catch {
 appDataDir := A_AppData "\HushDot"
 if !DirExist(appDataDir)
 try DirCreate(appDataDir)
 this.IniPath := appDataDir "\HushDot.ini"
-try {
-IniWrite(writeUnmuted, this.IniPath, "Icons", "UnmutedPath")
-IniWrite(this.IconIdxUnmuted,  this.IniPath, "Icons", "UnmutedIndex")
-IniWrite(writeMuted,   this.IniPath, "Icons", "MutedPath")
-IniWrite(this.IconIdxMuted,    this.IniPath, "Icons", "MutedIndex")
-IniWrite(writeSpkOn,   this.IniPath, "SpkIcons", "OnPath")
-IniWrite(this.SpkIconIdxOn,    this.IniPath, "SpkIcons", "OnIndex")
-IniWrite(writeSpkOff,  this.IniPath, "SpkIcons", "OffPath")
-IniWrite(this.SpkIconIdxOff,   this.IniPath, "SpkIcons", "OffIndex")
-IniWrite(this.MicShortcutKey,      this.IniPath, "Settings", "MicShortcutKey")
-IniWrite(this.SpkShortcutKey,      this.IniPath, "Settings", "SpkShortcutKey")
-IniWrite(this.EnableMiniWindow ? "1" : "0", this.IniPath, "Settings", "MiniWindow")
-IniWrite(this.DarkMode ? "1" : "0",         this.IniPath, "Settings", "DarkMode")
-IniWrite(this.MiniWindowSize,       this.IniPath, "Settings", "MiniWindowSize")
-IniWrite(this.MiniWindowBorder ? "1" : "0", this.IniPath, "Settings", "MiniWindowBorder")
-IniWrite(this.ShowMiniMicIcon ? "1" : "0",  this.IniPath, "Settings", "ShowMicIcon")
-IniWrite(this.ShowMiniSpkIcon ? "1" : "0",  this.IniPath, "Settings", "ShowSpkIcon")
-IniWrite(this.RunOnStart ? "1" : "0",       this.IniPath, "Settings", "RunOnStart")
-IniWrite(this.MuteAllMics ? "1" : "0",      this.IniPath, "Settings", "MuteAllMics")
-IniWrite(this.MuteAllSpeakers ? "1" : "0",  this.IniPath, "Settings", "MuteAllSpeakers")
-IniWrite(this.ShowTrayMic ? "1" : "0",      this.IniPath, "Settings", "TrayMic")
-IniWrite(this.ShowTraySpk ? "1" : "0",      this.IniPath, "Settings", "TraySpk")
-IniWrite(this.ShowTrayCam ? "1" : "0",      this.IniPath, "Settings", "TrayCam")
-IniWrite(this.ShowStartupBox ? "1" : "0",   this.IniPath, "Settings", "StartupNotice")
-IniWrite(this.CurrentMicName,          this.IniPath, "Settings", "SelectedMic")
-IniWrite(this.CurrentSpeakerName,      this.IniPath, "Settings", "SelectedSpk")
-IniWrite(this.MiniWindowSavedX,        this.IniPath, "Settings", "MiniWindowX")
-IniWrite(this.MiniWindowSavedY,        this.IniPath, "Settings", "MiniWindowY")
-}
+try this.WriteSettings(this.IniPath)
 }
 ; The .ini may have moved (e.g. to %APPDATA%); keep the mute state with it.
 this.SaveGroupState(this.MicAll)
 this.SaveGroupState(this.SpkAll)
+}
+static WriteSettings(path) {
+IniWrite(this.GetRelativeIconPath(this.IconPathUnmuted), path, "Icons", "UnmutedPath")
+IniWrite(this.IconIdxUnmuted,  path, "Icons", "UnmutedIndex")
+IniWrite(this.GetRelativeIconPath(this.IconPathMuted),   path, "Icons", "MutedPath")
+IniWrite(this.IconIdxMuted,    path, "Icons", "MutedIndex")
+IniWrite(this.GetRelativeIconPath(this.SpkIconPathOn),   path, "SpkIcons", "OnPath")
+IniWrite(this.SpkIconIdxOn,    path, "SpkIcons", "OnIndex")
+IniWrite(this.GetRelativeIconPath(this.SpkIconPathOff),  path, "SpkIcons", "OffPath")
+IniWrite(this.SpkIconIdxOff,   path, "SpkIcons", "OffIndex")
+IniWrite(this.MicShortcutKey,      path, "Settings", "MicShortcutKey")
+IniWrite(this.SpkShortcutKey,      path, "Settings", "SpkShortcutKey")
+IniWrite(this.EnableMiniWindow ? "1" : "0", path, "Settings", "MiniWindow")
+IniWrite(this.DarkMode ? "1" : "0",         path, "Settings", "DarkMode")
+IniWrite(this.MiniWindowSize,       path, "Settings", "MiniWindowSize")
+IniWrite(this.MiniWindowBorder ? "1" : "0", path, "Settings", "MiniWindowBorder")
+IniWrite(this.ShowMiniMicIcon ? "1" : "0",  path, "Settings", "ShowMicIcon")
+IniWrite(this.ShowMiniSpkIcon ? "1" : "0",  path, "Settings", "ShowSpkIcon")
+IniWrite(this.RunOnStart ? "1" : "0",       path, "Settings", "RunOnStart")
+IniWrite(this.MuteAllMics ? "1" : "0",      path, "Settings", "MuteAllMics")
+IniWrite(this.MuteAllSpeakers ? "1" : "0",  path, "Settings", "MuteAllSpeakers")
+IniWrite(this.ShowTrayMic ? "1" : "0",      path, "Settings", "TrayMic")
+IniWrite(this.ShowTraySpk ? "1" : "0",      path, "Settings", "TraySpk")
+IniWrite(this.ShowTrayCam ? "1" : "0",      path, "Settings", "TrayCam")
+IniWrite(this.ShowStartupBox ? "1" : "0",   path, "Settings", "StartupNotice")
+IniWrite(this.Language,                path, "Settings", "Language")
+IniWrite(this.CurrentMicName,          path, "Settings", "SelectedMic")
+IniWrite(this.CurrentSpeakerName,      path, "Settings", "SelectedSpk")
+IniWrite(this.MiniWindowSavedX,        path, "Settings", "MiniWindowX")
+IniWrite(this.MiniWindowSavedY,        path, "Settings", "MiniWindowY")
 }
 static JoinIds(arr) {
 ids := ""
@@ -545,7 +531,7 @@ return ""
 static SetWindowsDefaultOutput(name) {
 id := this.GetEndpointIdByName(0, name)
 if (id = "")
-throw Error("output device not found: " name)
+throw Error(T("notify.outputNotFound", name))
 pc := ComObject("{870AF99C-171D-4F9E-AF0D-E63DF40C2BC9}", "{F8679F50-850A-41CF-9C72-430F290290C8}")
 loop 2
 ComCall(13, pc, "WStr", id, "Int", A_Index - 1)   ; SetDefaultEndpoint: eConsole, eMultimedia
@@ -563,7 +549,7 @@ static CommitSpeakerChoice() {
 try {
 this.SetWindowsDefaultOutput(this.PendingSpeakerChoice)
 } catch as e {
-MicController.Notify("Could not switch the Windows output (" e.Message "). The mute button still controls this device.", this.AppName, "Icon!")
+MicController.Notify(T("notify.outputFailed", e.Message), this.AppName, "Icon!")
 }
 }
 static EnumerateDevices() {
@@ -681,24 +667,18 @@ A_TrayMenu.Add(menuTitle, (*) => this.ShowGUI())
 A_TrayMenu.Disable(menuTitle)
 this.SafeMenuSetIcon(A_TrayMenu, menuTitle, "shell32.dll", 28)
 A_TrayMenu.Add()
-A_TrayMenu.Add("Toggle Microphone", (*) => this.ToggleMicMute())
-this.SafeMenuSetIcon(A_TrayMenu, "Toggle Microphone", this.IconPathUnmuted, this.IconIdxUnmuted)
-A_TrayMenu.Add("Toggle Speaker", (*) => this.ToggleSpeakerMute())
-this.SafeMenuSetIcon(A_TrayMenu, "Toggle Speaker", this.SpkIconPathOn, this.SpkIconIdxOn)
+A_TrayMenu.Add(this.M("menu.toggleMic"), (*) => this.ToggleMicMute())
+this.SafeMenuSetIcon(A_TrayMenu, this.M("menu.toggleMic"), this.IconPathUnmuted, this.IconIdxUnmuted)
+A_TrayMenu.Add(this.M("menu.toggleSpk"), (*) => this.ToggleSpeakerMute())
+this.SafeMenuSetIcon(A_TrayMenu, this.M("menu.toggleSpk"), this.SpkIconPathOn, this.SpkIconIdxOn)
 A_TrayMenu.Add()
-A_TrayMenu.Add("Sound Settings", (*) => Run("ms-settings:sound"))
-this.SafeMenuSetIcon(A_TrayMenu, "Sound Settings", "shell32.dll", 278)
-A_TrayMenu.Add("Mic Privacy", (*) => Run("ms-settings:privacy-microphone"))
-this.SafeMenuSetIcon(A_TrayMenu, "Mic Privacy", "shell32.dll", 48)
+A_TrayMenu.Add(this.M("menu.soundSettings"), (*) => Run("ms-settings:sound"))
+this.SafeMenuSetIcon(A_TrayMenu, this.M("menu.soundSettings"), "shell32.dll", 278)
+A_TrayMenu.Add(this.M("menu.micPrivacy"), (*) => Run("ms-settings:privacy-microphone"))
+this.SafeMenuSetIcon(A_TrayMenu, this.M("menu.micPrivacy"), "shell32.dll", 48)
 A_TrayMenu.Add()
-A_TrayMenu.Add("Show Controls", (*) => this.ShowGUI())
-this.SafeMenuSetIcon(A_TrayMenu, "Show Controls", "shell32.dll", 22)
-A_TrayMenu.Add("Settings", (*) => this.ShowSettings())
-this.SafeMenuSetIcon(A_TrayMenu, "Settings", "shell32.dll", 22)
-A_TrayMenu.Add()
-A_TrayMenu.Add("Exit", (*) => MicController.OnExit())
-this.SafeMenuSetIcon(A_TrayMenu, "Exit", "shell32.dll", 132)
-A_TrayMenu.Default    := "Toggle Microphone"
+this.AddCommonMenuItems(A_TrayMenu)
+A_TrayMenu.Default    := this.M("menu.toggleMic")
 A_TrayMenu.ClickCount := 1
 this.UpdateTrayMenuIcons()
 }
@@ -722,7 +702,7 @@ return true
 } catch as err2 {
 }
 }
-MicController.Notify("Shortcut error: " . cleanKey . "`nCould not register hotkey.", this.AppName, "Icon!")
+MicController.Notify(T("notify.hotkeyError", cleanKey), this.AppName, "Icon!")
 return false
 }
 }
@@ -773,40 +753,30 @@ if (this.SettingsGui = "" || this.SettingsDdMic = "" || this.SettingsDdSpk = "")
 return
 try {
 this.SettingsDdMic.Delete()
-micList := []
-selMicIdx := 1
-ctr := 1
-for name, id in this.AvailableMics {
-micList.Push(name)
-if (name = this.CurrentMicName || id = this.CurrentMicName || (this.CurrentMicId != "" && id = this.CurrentMicId))
-selMicIdx := ctr
-ctr++
-}
-if (micList.Length = 0)
-micList.Push("(No microphone found)")
-this.SettingsDdMic.Add(micList)
+this.SettingsDdMic.Add(this.DeviceList(this.AvailableMics, this.CurrentMicName, this.CurrentMicId, "device.noMic", &selMicIdx))
 this.SettingsDdMic.Choose(selMicIdx)
 if (this.SettingsLblMicStatus != "")
-this.SettingsLblMicStatus.Value := "Active: " this.GetMicDisplayName()
+this.SettingsLblMicStatus.Value := this.Ui(T("device.active", this.GetMicDisplayName()))
 }
 try {
 this.SettingsDdSpk.Delete()
-spkList := []
-selSpkIdx := 1
-ctr := 1
-for name, id in this.AvailableSpeakers {
-spkList.Push(name)
-if (name = this.CurrentSpeakerName || id = this.CurrentSpeakerName || (this.CurrentSpeakerId != "" && id = this.CurrentSpeakerId))
-selSpkIdx := ctr
-ctr++
-}
-if (spkList.Length = 0)
-spkList.Push("(No speaker found)")
-this.SettingsDdSpk.Add(spkList)
+this.SettingsDdSpk.Add(this.DeviceList(this.AvailableSpeakers, this.CurrentSpeakerName, this.CurrentSpeakerId, "device.noSpk", &selSpkIdx))
 this.SettingsDdSpk.Choose(selSpkIdx)
 if (this.SettingsLblSpkStatus != "")
-this.SettingsLblSpkStatus.Value := "Active: " this.GetSpkDisplayName()
+this.SettingsLblSpkStatus.Value := this.Ui(T("device.active", this.GetSpkDisplayName()))
 }
+}
+; Names for a device drop-down list, and (in selIdx) the position of the selected device.
+static DeviceList(devices, curName, curId, emptyKey, &selIdx) {
+list := [], selIdx := 1
+for name, id in devices {
+list.Push(name)
+if (name = curName || id = curName || (curId != "" && id = curId))
+selIdx := list.Length
+}
+if (list.Length = 0)
+list.Push(T(emptyKey))
+return list
 }
 static GetMicDisplayName() {
 if (this.CurrentMicName != "")
@@ -815,7 +785,7 @@ for name, id in this.AvailableMics {
 if (id = this.CurrentMicId)
 return name
 }
-return "No microphone selected"
+return T("device.noMicSelected")
 }
 static GetSpkDisplayName() {
 if (this.CurrentSpeakerName != "")
@@ -824,7 +794,7 @@ for name, id in this.AvailableSpeakers {
 if (id = this.CurrentSpeakerId)
 return name
 }
-return "No speaker selected"
+return T("device.noSpkSelected")
 }
 static ToggleMicMute() {
 ; Not interruptible by the 1-second timer while the mute state changes.
@@ -840,12 +810,12 @@ this.AutoRefreshDevices()
 target := this.CurrentMicId != "" ? this.CurrentMicId : this.CurrentMicName
 }
 if (target = "")
-throw Error("No microphone device found.")
+throw Error(T("notify.noMicDevice"))
 cur := SoundGetMute(, target)
 SoundSetMute(!cur,, target)
 this.UpdateState()
 } catch as e {
-MicController.Notify("Mic Error: " e.Message, this.AppName, "Icon!")
+MicController.Notify(T("notify.micError", e.Message), this.AppName, "Icon!")
 }
 }
 ; ---- Microphone in-use indicator ----------------------------------------------------
@@ -1296,32 +1266,39 @@ this.AutoRefreshDevices()
 target := this.CurrentSpeakerId != "" ? this.CurrentSpeakerId : this.CurrentSpeakerName
 }
 if (target = "")
-throw Error("No speaker device found.")
+throw Error(T("notify.noSpkDevice"))
 cur := SoundGetMute(, target)
 SoundSetMute(!cur,, target)
 this.UpdateState()
 } catch as e {
-MicController.Notify("Speaker Error: " e.Message, this.AppName, "Icon!")
+MicController.Notify(T("notify.spkError", e.Message), this.AppName, "Icon!")
 }
 }
 static SetupSpeakerTray() {
-if (this.SpkTray = "") {
-spkMenu := Menu()
-spkMenu.Add("Toggle Speaker", (*) => this.ToggleSpeakerMute())
-this.SafeMenuSetIcon(spkMenu, "Toggle Speaker", this.SpkIconPathOn, this.SpkIconIdxOn)
-spkMenu.Add("Toggle Microphone", (*) => this.ToggleMicMute())
-this.SafeMenuSetIcon(spkMenu, "Toggle Microphone", this.IconPathUnmuted, this.IconIdxUnmuted)
-spkMenu.Add()
-spkMenu.Add("Show Controls", (*) => this.ShowGUI())
-this.SafeMenuSetIcon(spkMenu, "Show Controls", "shell32.dll", 22)
-spkMenu.Add("Settings", (*) => this.ShowSettings())
-this.SafeMenuSetIcon(spkMenu, "Settings", "shell32.dll", 22)
-spkMenu.Add()
-spkMenu.Add("Exit", (*) => MicController.OnExit())
-this.SafeMenuSetIcon(spkMenu, "Exit", "shell32.dll", 132)
-this.SpkTray := ExtraTrayIcon(3, () => MicController.ToggleSpeakerMute("tray"), spkMenu)
-}
+if (this.SpkTray = "")
+this.SpkTray := ExtraTrayIcon(3, () => MicController.ToggleSpeakerMute("tray"), this.BuildSpeakerMenu()
+, (hwnd) => MicController.ShowDevicePicker("spk", hwnd))
 this.UpdateSpeakerTrayIcon()
+}
+static BuildSpeakerMenu() {
+spkMenu := Menu()
+spkMenu.Add(this.M("menu.toggleSpk"), (*) => this.ToggleSpeakerMute())
+this.SafeMenuSetIcon(spkMenu, this.M("menu.toggleSpk"), this.SpkIconPathOn, this.SpkIconIdxOn)
+spkMenu.Add(this.M("menu.toggleMic"), (*) => this.ToggleMicMute())
+this.SafeMenuSetIcon(spkMenu, this.M("menu.toggleMic"), this.IconPathUnmuted, this.IconIdxUnmuted)
+spkMenu.Add()
+this.AddCommonMenuItems(spkMenu)
+return spkMenu
+}
+; Show Controls, Settings and Exit, at the end of every tray icon menu.
+static AddCommonMenuItems(m) {
+m.Add(this.M("menu.showControls"), (*) => this.ShowGUI())
+this.SafeMenuSetIcon(m, this.M("menu.showControls"), "shell32.dll", 22)
+m.Add(this.M("menu.settings"), (*) => this.ShowSettings())
+this.SafeMenuSetIcon(m, this.M("menu.settings"), "shell32.dll", 22)
+m.Add()
+m.Add(this.M("menu.exit"), (*) => MicController.OnExit())
+this.SafeMenuSetIcon(m, this.M("menu.exit"), "shell32.dll", 132)
 }
 static UpdateSpeakerTrayIcon() {
 if (this.SpkTray = "")
@@ -1332,29 +1309,26 @@ return
 }
 idx  := this.IsSpeakerMuted ? this.SpkIconIdxOff : this.SpkIconIdxOn
 path := this.ResolveIconPath(this.IsSpeakerMuted ? this.SpkIconPathOff : this.SpkIconPathOn)
-tip := !this.IsSpeakerMuted ? "Speaker : Active"
-: this.SpkAll.Active ? "Speaker : Mute (all)" : "Speaker : Mute"
+tip := !this.IsSpeakerMuted ? T("tip.spkActive")
+: this.SpkAll.Active ? T("tip.spkMutedAll") : T("tip.spkMuted")
 this.SpkTray.Show(path, idx, tip)
 }
 ; ---- Camera icon: opens the Windows Camera app and shows who is using a camera -------
 static SetupCameraTray() {
-if (this.CamTray = "") {
-camMenu := Menu()
-camMenu.Add("Open Camera", (*) => MicController.OpenCameraApp())
-this.SafeMenuSetIcon(camMenu, "Open Camera", this.CamIconPath(true, false), 0)
-camMenu.Add("Camera Privacy", (*) => Run("ms-settings:privacy-webcam"))
-this.SafeMenuSetIcon(camMenu, "Camera Privacy", "shell32.dll", 48)
-camMenu.Add()
-camMenu.Add("Show Controls", (*) => this.ShowGUI())
-this.SafeMenuSetIcon(camMenu, "Show Controls", "shell32.dll", 22)
-camMenu.Add("Settings", (*) => this.ShowSettings())
-this.SafeMenuSetIcon(camMenu, "Settings", "shell32.dll", 22)
-camMenu.Add()
-camMenu.Add("Exit", (*) => MicController.OnExit())
-this.SafeMenuSetIcon(camMenu, "Exit", "shell32.dll", 132)
-this.CamTray := ExtraTrayIcon(4, () => MicController.OpenCameraApp(), camMenu)
-}
+if (this.CamTray = "")
+this.CamTray := ExtraTrayIcon(4, () => MicController.OpenCameraApp(), this.BuildCameraMenu()
+, (hwnd) => MicController.ShowDevicePicker("cam", hwnd))
 this.UpdateCameraTrayIcon()
+}
+static BuildCameraMenu() {
+camMenu := Menu()
+camMenu.Add(this.M("menu.openCamera"), (*) => MicController.OpenCameraApp())
+this.SafeMenuSetIcon(camMenu, this.M("menu.openCamera"), this.CamIconPath(true, false), 0)
+camMenu.Add(this.M("menu.cameraPrivacy"), (*) => Run("ms-settings:privacy-webcam"))
+this.SafeMenuSetIcon(camMenu, this.M("menu.cameraPrivacy"), "shell32.dll", 48)
+camMenu.Add()
+this.AddCommonMenuItems(camMenu)
+return camMenu
 }
 ; Grey = no app using a camera, violet = Windows Camera app open, green dot = in use.
 static CamIconPath(appOpen, inUse) {
@@ -1368,15 +1342,15 @@ this.CamTray.Hide()
 return
 }
 inUse := this.CamUsers.Length > 0
-tip := inUse ? "Camera : In use by: " this.JoinNames(this.CamUsers)
-: this.CamAppOpen ? "Camera : Camera app open" : "Camera : Off"
+tip := inUse ? T("tip.camInUse", this.JoinNames(this.CamUsers))
+: this.CamAppOpen ? T("tip.camAppOpen") : T("tip.camOff")
 this.CamTray.Show(this.CamIconPath(this.CamAppOpen, inUse), 0, tip)
 }
 static OpenCameraApp() {
 try {
 Run("microsoft.windows.camera:")
 } catch as e {
-MicController.Notify("Could not open the Windows Camera app (" e.Message ").", this.AppName, "Icon!")
+MicController.Notify(T("notify.cameraFailed", e.Message), this.AppName, "Icon!")
 }
 }
 ; Windows notifications can be turned off (Settings > System > Notifications); TrayTip is then
@@ -1400,11 +1374,11 @@ g.MarginX := 18, g.MarginY := 16
 appIcon := A_IsCompiled ? A_ScriptFullPath : A_ScriptDir "\icons\app.ico"
 try g.Add("Picture", "w32 h32 Icon1", appIcon)
 g.SetFont("s11 bold c" fg, "Segoe UI")
-g.Add("Text", "x+12 yp+6 w300", "HushDot is running")
+g.Add("Text", "x+12 yp+6 w300", this.Ui(T("startup.title")))
 g.SetFont("s9 norm c" sub, "Segoe UI")
-g.Add("Text", "xm y+16 w344", "Its icons are in the system tray, next to the clock. If you don't see them, click the ^ arrow there and drag them onto the taskbar.")
-chk := g.Add("CheckBox", "xm y+14 w230 c" sub, "Don't show this again")
-btn := g.Add("Button", "x+14 yp-5 w100 h28 Default", "OK")
+g.Add("Text", "xm y+16 w344", this.Ui(T("startup.body")))
+chk := g.Add("CheckBox", "xm y+14 w230 c" sub, this.Ui(T("startup.dontShow")))
+btn := g.Add("Button", "x+14 yp-5 w100 h28 Default", this.Ui(T("common.ok")))
 closed := false
 CloseNotice(*) {
 if closed
@@ -1525,10 +1499,10 @@ try menuObj.SetIcon(itemName, resolved, idx)
 static UpdateTrayMenuIcons() {
 micPath := this.IsMuted ? this.IconPathMuted : this.IconPathUnmuted
 micIdx  := this.IsMuted ? this.IconIdxMuted  : this.IconIdxUnmuted
-this.SafeMenuSetIcon(A_TrayMenu, "Toggle Microphone", micPath, micIdx)
+this.SafeMenuSetIcon(A_TrayMenu, this.M("menu.toggleMic"), micPath, micIdx)
 spkPath := this.IsSpeakerMuted ? this.SpkIconPathOff : this.SpkIconPathOn
 spkIdx  := this.IsSpeakerMuted ? this.SpkIconIdxOff  : this.SpkIconIdxOn
-this.SafeMenuSetIcon(A_TrayMenu, "Toggle Speaker", spkPath, spkIdx)
+this.SafeMenuSetIcon(A_TrayMenu, this.M("menu.toggleSpk"), spkPath, spkIdx)
 }
 static UpdateState() {
 micTarget := this.CurrentMicId != "" ? this.CurrentMicId : this.CurrentMicName
@@ -1587,18 +1561,18 @@ this.AutoRefreshDevices()
 if this.IsMuted {
 resolvedPath := this.ResolveIconPath(this.IconPathMuted)
 iconIdx := this.IconIdxMuted
-tip := (this.MuteAllMics || this.MicAll.Active) ? "MIC : Mute (all)" : "MIC : Mute"
+tip := (this.MuteAllMics || this.MicAll.Active) ? T("tip.micMutedAll") : T("tip.micMuted")
 } else {
 resolvedPath := this.ResolveIconPath(this.IconPathUnmuted)
 iconIdx := this.IconIdxUnmuted
-tip := "MIC : Active"
+tip := T("tip.micActive")
 }
 ; Orange dot when any app is using a microphone, muted or not (like the iPhone indicator).
 if (this.MicUsers.Length > 0) {
 inUsePath := this.InUseIconPath(resolvedPath)
 if (inUsePath != "")
 resolvedPath := inUsePath
-tip .= "`nIn use by: " this.JoinNames(this.MicUsers)
+tip .= "`n" T("tip.inUseBy", this.JoinNames(this.MicUsers))
 }
 if this.ShowTrayMic {
 try TraySetIcon(resolvedPath, iconIdx)
@@ -1620,7 +1594,7 @@ bg   := "F3F3F3"
 card := "FFFFFF"
 fg   := "1A1A1A"
 sub  := "616161"
-acc  := "0078D4"
+L(key) => MicController.Ui(T(key))
 g := Gui("+AlwaysOnTop -MinimizeBox", this.AppName)
 g.BackColor := bg
 g.MarginX := 16
@@ -1631,83 +1605,93 @@ g.SetFont("s14 bold", "Segoe UI")
 hdr := g.Add("Text", "xm w368 center", this.AppName)
 hdr.Opt("c" fg)
 g.SetFont("s8", "Segoe UI")
-ver := g.Add("Text", "xm w368 center", "Audio Control Panel")
+ver := g.Add("Text", "xm w368 center", L("controls.subtitle"))
 ver.Opt("c" sub)
 g.SetFont("s10", "Segoe UI")
 g.Add("Text", "xm y+8 w368 h1 0x10")
 g.SetFont("s9 bold", "Segoe UI")
-g.Add("Text", "xm y+10 w368 h28 0x200 Background" card, "   Microphone").Opt("c" fg)
+g.Add("Text", "xm y+10 w368 h28 0x200 Background" card, "   " L("controls.mic")).Opt("c" fg)
 g.SetFont("s9 norm", "Segoe UI")
-micList := []
-selMicIdx := 1
-ctr := 1
-for name, id in this.AvailableMics {
-micList.Push(name)
-if (name = this.CurrentMicName || id = this.CurrentMicName || (this.CurrentMicId != "" && id = this.CurrentMicId))
-selMicIdx := ctr
-ctr++
-}
-if micList.Length = 0
-micList.Push("(No microphone found)")
+micList := this.DeviceList(this.AvailableMics, this.CurrentMicName, this.CurrentMicId, "device.noMic", &selMicIdx)
 this.DropdownMics := g.Add("DropDownList", "xm y+4 w368 Choose" selMicIdx, micList)
 this.DropdownMics.Opt("Background" card " c" fg)
-this.DropdownMics.OnEvent("Change", (*) => this.OnMicDeviceChange())
+this.DropdownMics.OnEvent("Change", (*) => this.SelectMic(this.DropdownMics.Text))
 g.SetFont("s16 bold", "Segoe UI")
-this.TextMicStatus := g.Add("Text", "xm y+6 w368 h40 center Background" card, "Checking...")
+this.TextMicStatus := g.Add("Text", "xm y+6 w368 h40 center Background" card, L("controls.checking"))
 this.TextMicStatus.Opt("c" sub)
 g.SetFont("s10", "Segoe UI")
-this.BtnHushDot := g.Add("Button", "xm y+4 w368 h38", "Toggle Mic")
+this.BtnHushDot := g.Add("Button", "xm y+4 w368 h38", L("controls.toggleMic"))
 this.BtnHushDot.OnEvent("Click", (*) => this.ToggleMicMute())
 g.Add("Text", "xm y+12 w368 h1 0x10")
 g.SetFont("s9 bold", "Segoe UI")
-g.Add("Text", "xm y+10 w368 h28 0x200 Background" card, "   Speaker / Output").Opt("c" fg)
+g.Add("Text", "xm y+10 w368 h28 0x200 Background" card, "   " L("controls.spk")).Opt("c" fg)
 g.SetFont("s9 norm", "Segoe UI")
-spkList := []
-selSpkIdx := 1
-ctr := 1
-for name, id in this.AvailableSpeakers {
-spkList.Push(name)
-if (name = this.CurrentSpeakerName || id = this.CurrentSpeakerName || (this.CurrentSpeakerId != "" && id = this.CurrentSpeakerId))
-selSpkIdx := ctr
-ctr++
-}
-if spkList.Length = 0
-spkList.Push("(No speaker found)")
+spkList := this.DeviceList(this.AvailableSpeakers, this.CurrentSpeakerName, this.CurrentSpeakerId, "device.noSpk", &selSpkIdx)
 this.DropdownSpks := g.Add("DropDownList", "xm y+4 w368 Choose" selSpkIdx, spkList)
 this.DropdownSpks.Opt("Background" card " c" fg)
-this.DropdownSpks.OnEvent("Change", (*) => this.OnSpeakerDeviceChange())
+this.DropdownSpks.OnEvent("Change", (*) => this.SelectSpeaker(this.DropdownSpks.Text))
 g.SetFont("s16 bold", "Segoe UI")
-this.TextSpkStatus := g.Add("Text", "xm y+6 w368 h40 center Background" card, "Checking...")
+this.TextSpkStatus := g.Add("Text", "xm y+6 w368 h40 center Background" card, L("controls.checking"))
 this.TextSpkStatus.Opt("c" sub)
 g.SetFont("s10", "Segoe UI")
-this.BtnSpkToggle := g.Add("Button", "xm y+4 w368 h38", "Toggle Speaker")
+this.BtnSpkToggle := g.Add("Button", "xm y+4 w368 h38", L("controls.toggleSpk"))
 this.BtnSpkToggle.OnEvent("Click", (*) => this.ToggleSpeakerMute())
 g.Add("Text", "xm y+12 w368 h1 0x10")
-btnSettings := g.Add("Button", "xm y+8 w178 h34", "Settings")
+btnSettings := g.Add("Button", "xm y+8 w178 h34", L("controls.settings"))
 btnSettings.OnEvent("Click", (*) => this.ShowSettings())
-btnWinSound := g.Add("Button", "x+12 yp w178 h34", "Sound Settings")
+btnWinSound := g.Add("Button", "x+12 yp w178 h34", L("controls.soundSettings"))
 btnWinSound.OnEvent("Click", (*) => Run("ms-settings:sound"))
 g.OnEvent("Close", (*) => (this.MainGui := "", g.Destroy()))
 g.Show("w400 AutoSize")
 this.UpdateGui()
 }
-static OnMicDeviceChange() {
-sel := this.DropdownMics.Text
-if this.AvailableMics.Has(sel) {
-this.CurrentMicName := sel
-this.CurrentMicId   := this.AvailableMics[sel]
+; Picking a device anywhere (Settings, Show Controls or the Ctrl+right-click menu) goes
+; through these two, so every open window shows the same choice.
+static SelectMic(name) {
+if !this.AvailableMics.Has(name)
+return
+this.CurrentMicName := name
+this.CurrentMicId   := this.AvailableMics[name]
 this.SaveSettings()
 this.UpdateState()
+this.SyncDeviceControls()
+this.NotifySettingsSaved()
 }
-}
-static OnSpeakerDeviceChange() {
-sel := this.DropdownSpks.Text
-if this.AvailableSpeakers.Has(sel) {
-this.CurrentSpeakerName := sel
-this.CurrentSpeakerId   := this.AvailableSpeakers[sel]
-this.ApplySpeakerChoice(sel)
+static SelectSpeaker(name) {
+if !this.AvailableSpeakers.Has(name)
+return
+this.CurrentSpeakerName := name
+this.CurrentSpeakerId   := this.AvailableSpeakers[name]
+this.ApplySpeakerChoice(name)
 this.SaveSettings()
 this.UpdateState()
+this.SyncDeviceControls()
+this.NotifySettingsSaved()
+}
+static SyncDeviceControls() {
+if (this.SettingsGui != "") {
+this.ChooseByText(this.SettingsDdMic, this.CurrentMicName)
+this.ChooseByText(this.SettingsDdSpk, this.CurrentSpeakerName)
+try this.SettingsLblMicStatus.Value := this.Ui(T("device.active", this.GetMicDisplayName()))
+try this.SettingsLblSpkStatus.Value := this.Ui(T("device.active", this.GetSpkDisplayName()))
+}
+if (this.MainGui != "") {
+this.ChooseByText(this.DropdownMics, this.CurrentMicName)
+this.ChooseByText(this.DropdownSpks, this.CurrentSpeakerName)
+}
+}
+; Selects the item with exactly this text (Choose(text) would also match a longer name).
+static ChooseByText(ctrl, text) {
+if (ctrl = "" || text = "")
+return
+try {
+for i, item in ControlGetItems(ctrl) {
+if (item = text) {
+if (ctrl.Value != i)
+ctrl.Choose(i)
+return
+}
+}
 }
 }
 static UpdateGui() {
@@ -1716,24 +1700,24 @@ return
 card := this.ThemeCard
 try {
 if this.IsMuted {
-this.TextMicStatus.Value := "  MICROPHONE MUTED"
+this.TextMicStatus.Value := "  " T("controls.micMuted")
 this.TextMicStatus.Opt("cE81123 Background" card)
-this.BtnHushDot.Text := "Unmute Microphone"
+this.BtnHushDot.Text := this.Ui(T("controls.unmuteMic"))
 } else {
-this.TextMicStatus.Value := "  MICROPHONE LIVE"
+this.TextMicStatus.Value := "  " T("controls.micLive")
 this.TextMicStatus.Opt("c0F7B0F Background" card)
-this.BtnHushDot.Text := "Mute Microphone"
+this.BtnHushDot.Text := this.Ui(T("controls.muteMic"))
 }
 }
 try {
 if this.IsSpeakerMuted {
-this.TextSpkStatus.Value := "  SPEAKER MUTED"
+this.TextSpkStatus.Value := "  " T("controls.spkMuted")
 this.TextSpkStatus.Opt("cE81123 Background" card)
-this.BtnSpkToggle.Text := "Unmute Speaker"
+this.BtnSpkToggle.Text := this.Ui(T("controls.unmuteSpk"))
 } else {
-this.TextSpkStatus.Value := "  SPEAKER ACTIVE"
+this.TextSpkStatus.Value := "  " T("controls.spkActive")
 this.TextSpkStatus.Opt("c0F7B0F Background" card)
-this.BtnSpkToggle.Text := "Mute Speaker"
+this.BtnSpkToggle.Text := this.Ui(T("controls.muteSpk"))
 }
 }
 }
@@ -1811,7 +1795,7 @@ this.ApplyMiniWindowRounding(bgCtrl.Hwnd, btnSize, btnSize, btnRadius)
 this.MiniSpkIconCtrl := ""
 this.MiniSpkBgCtrl := ""
 }
-this.MiniMenu.Add("Close Mini Window", (*) => this.DestroyMiniWindow())
+this.MiniMenu.Add(this.M("menu.closeMini"), (*) => this.DestroyMiniWindow())
 m.OnEvent("ContextMenu", (*) => this.MiniMenu.Show())
 m.OnEvent("Close", (*) => (this.MiniGui := ""))
 showOpts := "w" windowW " h" windowH " NoActivate"
@@ -1993,12 +1977,14 @@ this.MiniSpkIconCtrl.Value := resolvedPath
 }
 }
 }
-static ShowSettings() {
+static ShowSettings(startPage := 1) {
 if (this.SettingsGui != "") {
 this.SettingsGui.Show()
 return
 }
-g := Gui("-MinimizeBox -MaximizeBox", "Settings — " this.AppName)
+L(key, args*) => MicController.Ui(T(key, args*))
+Group(key) => "  " L(key) "  "
+g := Gui("-MinimizeBox -MaximizeBox", T("settings.title", this.AppName))
 g.BackColor := "FBFBFB"
 this.SettingsGui := g
 sidebarW := 210
@@ -2006,111 +1992,67 @@ g.Add("Text", "x0 y0 w" sidebarW " h590 BackgroundF2F4F7")
 g.SetFont("s12 bold", "Segoe UI")
 g.Add("Text", "x20 y18 w170 c1A1A1A BackgroundTrans", this.AppName)
 g.SetFont("s8", "Segoe UI")
-g.Add("Text", "x20 y40 w170 c707070 BackgroundTrans", "v" this.Version " • Privacy Signals")
+g.Add("Text", "x20 y40 w170 c707070 BackgroundTrans", L("settings.tagline", this.Version))
 g.Add("Text", "x16 y62 w178 h1 0x10 BackgroundTrans")
 pages := [[], [], [], [], []]
 g.SetFont("s14 bold", "Segoe UI")
-pages[1].Push(g.Add("Text", "x240 y18 w560 c1A1A1A", "Audio Devices"))
+pages[1].Push(g.Add("Text", "x240 y18 w560 c1A1A1A", L("audio.title")))
 g.SetFont("s9", "Segoe UI")
-pages[1].Push(g.Add("Text", "x240 y44 w560 c5E5E5E", "Manage active microphone and speaker devices"))
-pages[1].Push(g.Add("GroupBox", "x240 y75 w560 h190", "  Microphone Device  "))
-pages[1].Push(g.Add("Text", "x256 y100 w400 c1A1A1A", "Select default microphone for muting:"))
-micList := []
-selMicIdx := 1
-ctr := 1
-for name, id in this.AvailableMics {
-micList.Push(name)
-if (name = this.CurrentMicName || id = this.CurrentMicName || (this.CurrentMicId != "" && id = this.CurrentMicId))
-selMicIdx := ctr
-ctr++
-}
-if (micList.Length = 0)
-micList.Push("(No microphone found)")
+pages[1].Push(g.Add("Text", "x240 y44 w560 c5E5E5E", L("audio.subtitle")))
+pages[1].Push(g.Add("GroupBox", "x240 y75 w560 h190", Group("audio.micGroup")))
+; With "Mute all microphones" on, every microphone is muted and this choice is only the
+; fallback, so the label says so.
+lblMicPick := g.Add("Text", "x256 y100 w528 c1A1A1A", this.MicPickLabel())
+pages[1].Push(lblMicPick)
+this.SettingsLblMicPick := lblMicPick
+micList := this.DeviceList(this.AvailableMics, this.CurrentMicName, this.CurrentMicId, "device.noMic", &selMicIdx)
 ddMic := g.Add("DropDownList", "x256 y122 w424 Choose" selMicIdx, micList)
 pages[1].Push(ddMic)
 this.SettingsDdMic := ddMic
-OnInstantMicChange() {
-selMic := ddMic.Text
-if this.AvailableMics.Has(selMic) {
-this.CurrentMicName := selMic
-this.CurrentMicId   := this.AvailableMics[selMic]
-if (this.SettingsLblMicStatus != "")
-this.SettingsLblMicStatus.Value := "Active: " this.GetMicDisplayName()
-if (this.MainGui != "")
-this.UpdateGui()
-this.SaveSettings()
-this.UpdateState()
-this.NotifySettingsSaved()
-}
-}
-ddMic.OnEvent("Change", (*) => OnInstantMicChange())
-btnRefMic := g.Add("Button", "x688 y121 w96 h28", "🔄 Refresh")
+ddMic.OnEvent("Change", (*) => this.SelectMic(ddMic.Text))
+btnRefMic := g.Add("Button", "x688 y121 w96 h28", "🔄 " L("audio.refresh"))
 btnRefMic.OnEvent("Click", (*) => this.OnRefreshMics())
 pages[1].Push(btnRefMic)
-lblMicStatus := g.Add("Text", "x256 y156 w528 c5E5E5E", "Active: " this.GetMicDisplayName())
+lblMicStatus := g.Add("Text", "x256 y156 w528 c5E5E5E", L("device.active", this.GetMicDisplayName()))
 pages[1].Push(lblMicStatus)
 this.SettingsLblMicStatus := lblMicStatus
-btnWinRec := g.Add("Button", "x256 y185 w160 h30", "🎙️ Sound Recording")
+btnWinRec := g.Add("Button", "x256 y185 w220 h30", "🎙️ " L("audio.soundRecording"))
 btnWinRec.OnEvent("Click", (*) => Run("rundll32.exe shell32.dll,Control_RunDLL mmsys.cpl,,1"))
 pages[1].Push(btnWinRec)
-btnWinMicPriv := g.Add("Button", "x426 y185 w160 h30", "🔒 Mic Privacy")
+btnWinMicPriv := g.Add("Button", "x486 y185 w220 h30", "🔒 " L("audio.micPrivacy"))
 btnWinMicPriv.OnEvent("Click", (*) => Run("ms-settings:privacy-microphone"))
 pages[1].Push(btnWinMicPriv)
-chkMuteAll := g.Add("CheckBox", "x256 y228 w528 c1A1A1A", "Mute all microphones (unmute restores each one's previous state)")
+chkMuteAll := g.Add("CheckBox", "x256 y228 w528 c1A1A1A", L("audio.muteAllMics"))
 chkMuteAll.Value := this.MuteAllMics ? 1 : 0
 pages[1].Push(chkMuteAll)
 OnInstantMuteAllToggle() {
 this.MuteAllMics := chkMuteAll.Value = 1
+try lblMicPick.Value := this.MicPickLabel()
 this.SaveSettings()
 this.UpdateState()
 this.NotifySettingsSaved()
 }
 chkMuteAll.OnEvent("Click", (*) => OnInstantMuteAllToggle())
-pages[1].Push(g.Add("GroupBox", "x240 y280 w560 h190", "  Speaker Device  "))
-pages[1].Push(g.Add("Text", "x256 y305 w400 c1A1A1A", "Output device (also becomes the Windows default output):"))
-spkList := []
-selSpkIdx := 1
-ctr := 1
-for name, id in this.AvailableSpeakers {
-spkList.Push(name)
-if (name = this.CurrentSpeakerName || id = this.CurrentSpeakerName || (this.CurrentSpeakerId != "" && id = this.CurrentSpeakerId))
-selSpkIdx := ctr
-ctr++
-}
-if (spkList.Length = 0)
-spkList.Push("(No speaker found)")
+pages[1].Push(g.Add("GroupBox", "x240 y280 w560 h190", Group("audio.spkGroup")))
+pages[1].Push(g.Add("Text", "x256 y305 w528 c1A1A1A", L("audio.spkLabel")))
+spkList := this.DeviceList(this.AvailableSpeakers, this.CurrentSpeakerName, this.CurrentSpeakerId, "device.noSpk", &selSpkIdx)
 ddSpk := g.Add("DropDownList", "x256 y327 w424 Choose" selSpkIdx, spkList)
 pages[1].Push(ddSpk)
 this.SettingsDdSpk := ddSpk
-OnInstantSpkChange() {
-selSpk := ddSpk.Text
-if this.AvailableSpeakers.Has(selSpk) {
-this.CurrentSpeakerName := selSpk
-this.CurrentSpeakerId   := this.AvailableSpeakers[selSpk]
-this.ApplySpeakerChoice(selSpk)
-if (this.SettingsLblSpkStatus != "")
-this.SettingsLblSpkStatus.Value := "Active: " this.GetSpkDisplayName()
-if (this.MainGui != "")
-this.UpdateGui()
-this.SaveSettings()
-this.UpdateState()
-this.NotifySettingsSaved()
-}
-}
-ddSpk.OnEvent("Change", (*) => OnInstantSpkChange())
-btnRefSpk := g.Add("Button", "x688 y326 w96 h28", "🔄 Refresh")
+ddSpk.OnEvent("Change", (*) => this.SelectSpeaker(ddSpk.Text))
+btnRefSpk := g.Add("Button", "x688 y326 w96 h28", "🔄 " L("audio.refresh"))
 btnRefSpk.OnEvent("Click", (*) => this.OnRefreshSpeakers())
 pages[1].Push(btnRefSpk)
-lblSpkStatus := g.Add("Text", "x256 y361 w528 c5E5E5E", "Active: " this.GetSpkDisplayName())
+lblSpkStatus := g.Add("Text", "x256 y361 w528 c5E5E5E", L("device.active", this.GetSpkDisplayName()))
 pages[1].Push(lblSpkStatus)
 this.SettingsLblSpkStatus := lblSpkStatus
-btnWinPlay := g.Add("Button", "x256 y390 w160 h30", "🔊 Playback Devices")
+btnWinPlay := g.Add("Button", "x256 y390 w220 h30", "🔊 " L("audio.playback"))
 btnWinPlay.OnEvent("Click", (*) => Run("rundll32.exe shell32.dll,Control_RunDLL mmsys.cpl,,0"))
 pages[1].Push(btnWinPlay)
-btnWinSound := g.Add("Button", "x426 y390 w160 h30", "⚙️ Sound Settings")
+btnWinSound := g.Add("Button", "x486 y390 w220 h30", "⚙️ " L("audio.soundSettings"))
 btnWinSound.OnEvent("Click", (*) => Run("ms-settings:sound"))
 pages[1].Push(btnWinSound)
-chkMuteAllSpk := g.Add("CheckBox", "x256 y433 w528 c1A1A1A", "Mute all speakers (unmute restores each one's previous state)")
+chkMuteAllSpk := g.Add("CheckBox", "x256 y433 w528 c1A1A1A", L("audio.muteAllSpks"))
 chkMuteAllSpk.Value := this.MuteAllSpeakers ? 1 : 0
 pages[1].Push(chkMuteAllSpk)
 OnInstantMuteAllSpkToggle() {
@@ -2120,6 +2062,7 @@ this.UpdateState()
 this.NotifySettingsSaved()
 }
 chkMuteAllSpk.OnEvent("Click", (*) => OnInstantMuteAllSpkToggle())
+pages[1].Push(g.Add("Text", "x240 y482 w560 c5E5E5E", "💡 " L("audio.ctrlTip")))
 shortcutOptions := [
 "Ctrl+Shift+M",
 "Ctrl+Shift+S",
@@ -2173,21 +2116,21 @@ return A_Index
 return 1
 }
 g.SetFont("s14 bold", "Segoe UI")
-pages[2].Push(g.Add("Text", "x240 y18 w560 c1A1A1A", "Keyboard Shortcuts"))
+pages[2].Push(g.Add("Text", "x240 y18 w560 c1A1A1A", L("shortcuts.title")))
 g.SetFont("s9", "Segoe UI")
-pages[2].Push(g.Add("Text", "x240 y44 w560 c5E5E5E", "Configure global hotkeys and system audio utilities"))
-pages[2].Push(g.Add("GroupBox", "x240 y75 w560 h190", "  Global Hotkeys  "))
-pages[2].Push(g.Add("Text", "x256 y100 w400 c1A1A1A", "Toggle Microphone Mute Hotkey:"))
+pages[2].Push(g.Add("Text", "x240 y44 w560 c5E5E5E", L("shortcuts.subtitle")))
+pages[2].Push(g.Add("GroupBox", "x240 y75 w560 h190", Group("shortcuts.group")))
+pages[2].Push(g.Add("Text", "x256 y100 w528 c1A1A1A", L("shortcuts.micKey")))
 ddMicKey := g.Add("DropDownList", "x256 y122 w260 Choose" FindKeyIdx(this.MicShortcutKey), shortcutOptions)
 pages[2].Push(ddMicKey)
-pages[2].Push(g.Add("Text", "x256 y165 w400 c1A1A1A", "Toggle Speaker Mute Hotkey:"))
+pages[2].Push(g.Add("Text", "x256 y165 w528 c1A1A1A", L("shortcuts.spkKey")))
 ddSpkKey := g.Add("DropDownList", "x256 y187 w260 Choose" FindKeyIdx(this.SpkShortcutKey), shortcutOptions)
 pages[2].Push(ddSpkKey)
 OnInstantShortcutChange() {
 newMicKey := shortcutKeys[ddMicKey.Value]
 newSpkKey := shortcutKeys[ddSpkKey.Value]
 if (newMicKey = newSpkKey && newMicKey != "") {
-MsgBox("Microphone and Speaker shortcuts cannot be the same.", this.AppName, "Icon! 0x30")
+MsgBox(T("shortcuts.same"), this.AppName, "Icon! 0x30")
 ddMicKey.Choose(FindKeyIdx(this.MicShortcutKey))
 ddSpkKey.Choose(FindKeyIdx(this.SpkShortcutKey))
 return
@@ -2198,26 +2141,26 @@ this.NotifySettingsSaved()
 }
 ddMicKey.OnEvent("Change", (*) => OnInstantShortcutChange())
 ddSpkKey.OnEvent("Change", (*) => OnInstantShortcutChange())
-pages[2].Push(g.Add("Text", "x256 y230 w528 c5E5E5E", "ℹ️ Hotkeys function globally even when games and full-screen apps are focused."))
-pages[2].Push(g.Add("GroupBox", "x240 y280 w560 h190", "  Windows Audio Shortcuts  "))
-btnRec2 := g.Add("Button", "x256 y315 w160 h32", "🎙️ Recording Devices")
+pages[2].Push(g.Add("Text", "x256 y230 w528 c5E5E5E", "ℹ️ " L("shortcuts.info")))
+pages[2].Push(g.Add("GroupBox", "x240 y280 w560 h190", Group("shortcuts.winGroup")))
+btnRec2 := g.Add("Button", "x256 y315 w250 h32", "🎙️ " L("shortcuts.recording"))
 btnRec2.OnEvent("Click", (*) => Run("rundll32.exe shell32.dll,Control_RunDLL mmsys.cpl,,1"))
 pages[2].Push(btnRec2)
-btnPlay2 := g.Add("Button", "x426 y315 w160 h32", "🔊 Playback Devices")
+btnPlay2 := g.Add("Button", "x516 y315 w250 h32", "🔊 " L("shortcuts.playback"))
 btnPlay2.OnEvent("Click", (*) => Run("rundll32.exe shell32.dll,Control_RunDLL mmsys.cpl,,0"))
 pages[2].Push(btnPlay2)
-btnPriv2 := g.Add("Button", "x256 y365 w160 h32", "🔒 Mic Privacy Settings")
+btnPriv2 := g.Add("Button", "x256 y365 w250 h32", "🔒 " L("shortcuts.micPrivacy"))
 btnPriv2.OnEvent("Click", (*) => Run("ms-settings:privacy-microphone"))
 pages[2].Push(btnPriv2)
-btnSnd2 := g.Add("Button", "x426 y365 w160 h32", "⚙️ Windows Sound Settings")
+btnSnd2 := g.Add("Button", "x516 y365 w250 h32", "⚙️ " L("shortcuts.sound"))
 btnSnd2.OnEvent("Click", (*) => Run("ms-settings:sound"))
 pages[2].Push(btnSnd2)
 g.SetFont("s14 bold", "Segoe UI")
-pages[3].Push(g.Add("Text", "x240 y18 w560 c1A1A1A", "Mini Overlay"))
+pages[3].Push(g.Add("Text", "x240 y18 w560 c1A1A1A", L("mini.title")))
 g.SetFont("s9", "Segoe UI")
-pages[3].Push(g.Add("Text", "x240 y44 w560 c5E5E5E", "Configure the floating status widget"))
-pages[3].Push(g.Add("GroupBox", "x240 y75 w560 h395", "  Overlay Appearance && Behavior  "))
-chkMini := g.Add("CheckBox", "x256 y105 w300 c1A1A1A", "Enable Floating Mini Overlay")
+pages[3].Push(g.Add("Text", "x240 y44 w560 c5E5E5E", L("mini.subtitle")))
+pages[3].Push(g.Add("GroupBox", "x240 y75 w560 h395", Group("mini.group")))
+chkMini := g.Add("CheckBox", "x256 y105 w520 c1A1A1A", L("mini.enable"))
 chkMini.Value := this.EnableMiniWindow ? 1 : 0
 pages[3].Push(chkMini)
 OnInstantMiniToggle() {
@@ -2233,7 +2176,7 @@ this.SaveSettings()
 this.NotifySettingsSaved()
 }
 chkMini.OnEvent("Click", (*) => OnInstantMiniToggle())
-chkDark := g.Add("CheckBox", "x256 y140 w300 c1A1A1A", "Mini Window Dark Mode")
+chkDark := g.Add("CheckBox", "x256 y140 w520 c1A1A1A", L("mini.dark"))
 chkDark.Value := this.DarkMode ? 1 : 0
 pages[3].Push(chkDark)
 OnInstantDarkToggle() {
@@ -2249,7 +2192,7 @@ this.UpdateSpeakerTrayIcon()
 this.NotifySettingsSaved()
 }
 chkDark.OnEvent("Click", (*) => OnInstantDarkToggle())
-chkBorder := g.Add("CheckBox", "x256 y175 w300 c1A1A1A", "Mini Window Border")
+chkBorder := g.Add("CheckBox", "x256 y175 w520 c1A1A1A", L("mini.border"))
 chkBorder.Value := this.MiniWindowBorder ? 1 : 0
 pages[3].Push(chkBorder)
 OnInstantBorderToggle() {
@@ -2262,16 +2205,16 @@ this.SaveSettings()
 this.NotifySettingsSaved()
 }
 chkBorder.OnEvent("Click", (*) => OnInstantBorderToggle())
-chkShowMic := g.Add("CheckBox", "x256 y210 w300 c1A1A1A", "Show Mic Icon")
+chkShowMic := g.Add("CheckBox", "x256 y210 w520 c1A1A1A", L("mini.showMic"))
 chkShowMic.Value := this.ShowMiniMicIcon ? 1 : 0
 pages[3].Push(chkShowMic)
-chkShowSpk := g.Add("CheckBox", "x256 y245 w300 c1A1A1A", "Show Speaker Icon")
+chkShowSpk := g.Add("CheckBox", "x256 y245 w520 c1A1A1A", L("mini.showSpk"))
 chkShowSpk.Value := this.ShowMiniSpkIcon ? 1 : 0
 pages[3].Push(chkShowSpk)
 OnInstantMiniIconToggle() {
 if (chkShowMic.Value = 0 && chkShowSpk.Value = 0) {
 chkShowMic.Value := 1
-MsgBox("At least one icon must remain enabled on the mini overlay.", this.AppName, "Icon! 0x30")
+MsgBox(T("mini.oneIcon"), this.AppName, "Icon! 0x30")
 }
 this.ShowMiniMicIcon := chkShowMic.Value = 1
 this.ShowMiniSpkIcon := chkShowSpk.Value = 1
@@ -2284,7 +2227,7 @@ this.NotifySettingsSaved()
 }
 chkShowMic.OnEvent("Click", (*) => OnInstantMiniIconToggle())
 chkShowSpk.OnEvent("Click", (*) => OnInstantMiniIconToggle())
-pages[3].Push(g.Add("Text", "x256 y285 w140 c1A1A1A", "Mini Window Size:"))
+pages[3].Push(g.Add("Text", "x256 y285 w300 c1A1A1A", L("mini.size")))
 sldMiniSize := g.Add("Slider", "x256 y305 w300 Range1-200", this.MiniWindowSize)
 pages[3].Push(sldMiniSize)
 lblSize := g.Add("Text", "x570 y305 w60 c1A1A1A", this.MiniWindowSize "%")
@@ -2303,58 +2246,60 @@ this.SaveSettings()
 this.NotifySettingsSaved()
 }
 sldMiniSize.OnEvent("Change", (*) => OnInstantSizeChange())
-pages[3].Push(g.Add("Text", "x256 y360 w520 c5E5E5E", "Tip: Click and drag the mini overlay anywhere on screen to reposition it."))
+pages[3].Push(g.Add("Text", "x256 y360 w520 c5E5E5E", L("mini.tip")))
 g.SetFont("s14 bold", "Segoe UI")
-pages[4].Push(g.Add("Text", "x240 y18 w560 c1A1A1A", "Tray Icons"))
+pages[4].Push(g.Add("Text", "x240 y18 w560 c1A1A1A", L("tray.title")))
 g.SetFont("s9", "Segoe UI")
-pages[4].Push(g.Add("Text", "x240 y44 w560 c5E5E5E", "Customize system tray notification icons"))
-pages[4].Push(g.Add("GroupBox", "x240 y75 w560 h138", "  Microphone Tray Icon  "))
+pages[4].Push(g.Add("Text", "x240 y44 w560 c5E5E5E", L("tray.subtitle")))
+pages[4].Push(g.Add("GroupBox", "x240 y75 w560 h138", Group("tray.micGroup")))
 picUnmuted := g.Add("Picture", "x256 y100 w24 h24 Icon" (this.IconIdxUnmuted + 1), this.IconPathUnmuted)
 pages[4].Push(picUnmuted)
-pages[4].Push(g.Add("Text", "x290 y104 w120 c1A1A1A", "Unmuted"))
-btnChgUn := g.Add("Button", "x426 y99 w100 h28", "Change...")
+pages[4].Push(g.Add("Text", "x290 y104 w130 c1A1A1A", L("tray.unmuted")))
+btnChgUn := g.Add("Button", "x426 y99 w100 h28", L("tray.change"))
 btnChgUn.OnEvent("Click", (*) => this.OnChangeIcon(1, picUnmuted))
 pages[4].Push(btnChgUn)
 picMuted := g.Add("Picture", "x256 y138 w24 h24 Icon" (this.IconIdxMuted + 1), this.IconPathMuted)
 pages[4].Push(picMuted)
-pages[4].Push(g.Add("Text", "x290 y142 w120 c1A1A1A", "Muted"))
-btnChgMu := g.Add("Button", "x426 y137 w100 h28", "Change...")
+pages[4].Push(g.Add("Text", "x290 y142 w130 c1A1A1A", L("tray.muted")))
+btnChgMu := g.Add("Button", "x426 y137 w100 h28", L("tray.change"))
 btnChgMu.OnEvent("Click", (*) => this.OnChangeIcon(0, picMuted))
 pages[4].Push(btnChgMu)
-chkTrayMic := g.Add("CheckBox", "x256 y180 w520 c1A1A1A", "Show the microphone icon in the system tray")
+chkTrayMic := g.Add("CheckBox", "x256 y180 w520 c1A1A1A", L("tray.showMic"))
 chkTrayMic.Value := this.ShowTrayMic ? 1 : 0
 pages[4].Push(chkTrayMic)
-pages[4].Push(g.Add("GroupBox", "x240 y222 w560 h138", "  Speaker Tray Icon  "))
+pages[4].Push(g.Add("GroupBox", "x240 y222 w560 h138", Group("tray.spkGroup")))
 picSpkOn := g.Add("Picture", "x256 y247 w24 h24 Icon" (this.SpkIconIdxOn + 1), this.SpkIconPathOn)
 pages[4].Push(picSpkOn)
-pages[4].Push(g.Add("Text", "x290 y251 w120 c1A1A1A", "Speaker Active"))
-btnChgSpkOn := g.Add("Button", "x426 y246 w100 h28", "Change...")
+pages[4].Push(g.Add("Text", "x290 y251 w130 c1A1A1A", L("tray.spkActive")))
+btnChgSpkOn := g.Add("Button", "x426 y246 w100 h28", L("tray.change"))
 btnChgSpkOn.OnEvent("Click", (*) => this.OnChangeSpkIcon(1, picSpkOn))
 pages[4].Push(btnChgSpkOn)
 picSpkOff := g.Add("Picture", "x256 y285 w24 h24 Icon" (this.SpkIconIdxOff + 1), this.SpkIconPathOff)
 pages[4].Push(picSpkOff)
-pages[4].Push(g.Add("Text", "x290 y289 w120 c1A1A1A", "Speaker Muted"))
-btnChgSpkOff := g.Add("Button", "x426 y284 w100 h28", "Change...")
+pages[4].Push(g.Add("Text", "x290 y289 w130 c1A1A1A", L("tray.spkMuted")))
+btnChgSpkOff := g.Add("Button", "x426 y284 w100 h28", L("tray.change"))
 btnChgSpkOff.OnEvent("Click", (*) => this.OnChangeSpkIcon(0, picSpkOff))
 pages[4].Push(btnChgSpkOff)
-chkTraySpk := g.Add("CheckBox", "x256 y327 w520 c1A1A1A", "Show the speaker icon in the system tray")
+chkTraySpk := g.Add("CheckBox", "x256 y327 w520 c1A1A1A", L("tray.showSpk"))
 chkTraySpk.Value := this.ShowTraySpk ? 1 : 0
 pages[4].Push(chkTraySpk)
-pages[4].Push(g.Add("GroupBox", "x240 y369 w560 h145", "  Camera Tray Icon  "))
+pages[4].Push(g.Add("GroupBox", "x240 y369 w560 h145", Group("tray.camGroup")))
 camX := 256
 for state in [[false, false], [true, false], [false, true], [true, true]] {
 pages[4].Push(g.Add("Picture", "x" camX " y396 w24 h24", this.CamIconPath(state[1], state[2])))
 camX += 32
 }
-pages[4].Push(g.Add("Text", "x392 y392 w396 h50 c5E5E5E", "Grey: no app is using a camera. Violet: the Windows Camera app is open. Green dot: an app is using a camera (hover the icon to see which). Click the icon to open the Camera app."))
-chkTrayCam := g.Add("CheckBox", "x256 y476 w520 c1A1A1A", "Show the camera icon in the system tray")
+g.SetFont("s8", "Segoe UI")
+pages[4].Push(g.Add("Text", "x392 y390 w396 c5E5E5E", L("tray.camLegend")))
+g.SetFont("s9", "Segoe UI")
+chkTrayCam := g.Add("CheckBox", "x256 y480 w520 c1A1A1A", L("tray.showCam"))
 chkTrayCam.Value := this.ShowTrayCam ? 1 : 0
 pages[4].Push(chkTrayCam)
 OnTrayIconToggle(chk, key) {
 visible := chk.Value = 1
 if (!visible && this.VisibleTrayIconCount() <= 1) {
 chk.Value := 1
-MsgBox("At least one HushDot icon must stay in the system tray.", this.AppName, "Iconi Owner" g.Hwnd)
+MsgBox(T("tray.oneIcon"), this.AppName, "Iconi Owner" g.Hwnd)
 return
 }
 this.SetTrayIconVisible(key, visible)
@@ -2365,11 +2310,11 @@ chkTrayMic.OnEvent("Click", (*) => OnTrayIconToggle(chkTrayMic, "mic"))
 chkTraySpk.OnEvent("Click", (*) => OnTrayIconToggle(chkTraySpk, "spk"))
 chkTrayCam.OnEvent("Click", (*) => OnTrayIconToggle(chkTrayCam, "cam"))
 g.SetFont("s14 bold", "Segoe UI")
-pages[5].Push(g.Add("Text", "x240 y18 w560 c1A1A1A 0x80", "System & About"))
+pages[5].Push(g.Add("Text", "x240 y18 w560 c1A1A1A", L("system.title")))
 g.SetFont("s9", "Segoe UI")
-pages[5].Push(g.Add("Text", "x240 y44 w560 c5E5E5E", "Manage startup settings and application information"))
-pages[5].Push(g.Add("GroupBox", "x240 y75 w560 h130", "  System Integration  "))
-chkStart := g.Add("CheckBox", "x256 y100 w300 c1A1A1A", "Run HushDot on Windows Startup")
+pages[5].Push(g.Add("Text", "x240 y44 w560 c5E5E5E", L("system.subtitle")))
+pages[5].Push(g.Add("GroupBox", "x240 y75 w560 h130", Group("system.group")))
+chkStart := g.Add("CheckBox", "x256 y100 w520 c1A1A1A", L("system.runOnStart"))
 chkStart.Value := this.RunOnStart ? 1 : 0
 pages[5].Push(chkStart)
 OnInstantStartupToggle() {
@@ -2379,22 +2324,22 @@ this.SaveSettings()
 this.NotifySettingsSaved()
 }
 chkStart.OnEvent("Click", (*) => OnInstantStartupToggle())
-chkNotice := g.Add("CheckBox", "x256 y124 w520 c1A1A1A", "Show " Chr(34) "HushDot is running" Chr(34) " when HushDot is started by hand")
+chkNotice := g.Add("CheckBox", "x256 y124 w520 c1A1A1A", L("system.startupNotice", T("startup.title")))
 chkNotice.Value := this.ShowStartupBox ? 1 : 0
 pages[5].Push(chkNotice)
 chkNotice.OnEvent("Click", (*) => (this.ShowStartupBox := chkNotice.Value = 1, this.SaveSettings(), this.NotifySettingsSaved()))
-btnSponsor := g.Add("Button", "x256 y156 w160 h32", "💖 Sponsor")
+btnSponsor := g.Add("Button", "x256 y156 w160 h32", "💖 " L("system.sponsor"))
 btnSponsor.OnEvent("Click", (*) => Run("https://github.com/sponsors/Niptrion"))
 pages[5].Push(btnSponsor)
-pages[5].Push(g.Add("GroupBox", "x240 y210 w560 h280", "  About HushDot  "))
+pages[5].Push(g.Add("GroupBox", "x240 y210 w560 h280", Group("system.aboutGroup")))
 g.SetFont("s12 bold", "Segoe UI")
 pages[5].Push(g.Add("Text", "x256 y236 w528 c1A1A1A", this.AppName " v" this.Version))
 g.SetFont("s9 bold", "Segoe UI")
-pages[5].Push(g.Add("Text", "x256 y262 w528 c5E5E5E", "Privacy Signals for Windows 11 (formerly TrayMute)"))
-g.SetFont("s9", "Segoe UI")
-pages[5].Push(g.Add("Text", "x256 y288 w528 c1A1A1A", "HushDot shows when any app is using your microphone (orange dot) or camera (green dot), and which app it is, and mutes every microphone or speaker with one click, a hotkey or the floating mini window."))
-pages[5].Push(g.Add("Text", "x256 y342 w528 c5E5E5E", "• Global hotkeys with full-screen game and application compatibility`n• Intelligent device detection with auto-select and auto-refresh`n• Floating mini overlay widget and independent dual tray icons"))
-btnCredits := g.Add("Button", "x256 y432 w160 h34", "📜 Créditos")
+pages[5].Push(g.Add("Text", "x256 y262 w528 c5E5E5E", L("system.tagline")))
+g.SetFont("s9 norm", "Segoe UI")
+pages[5].Push(g.Add("Text", "x256 y288 w528 c1A1A1A", L("system.about")))
+pages[5].Push(g.Add("Text", "x256 y350 w528 c5E5E5E", "• " L("system.feature1") "`n• " L("system.feature2") "`n• " L("system.feature3")))
+btnCredits := g.Add("Button", "x256 y432 w160 h34", "📜 " L("system.credits"))
 btnCredits.OnEvent("Click", (*) => Run("https://github.com/xionraj/MuteGuard"))
 pages[5].Push(btnCredits)
 loop 4 {
@@ -2402,10 +2347,11 @@ pIdx := A_Index + 1
 for c in pages[pIdx]
 c.Visible := false
 }
-navItems := ["🎙️   Audio Devices", "⌨️   Shortcuts", "🪟   Mini Overlay", "🎨   Tray Icons", "⚙️   System && About"]
+navItems := ["🎙️   " L("nav.audio"), "⌨️   " L("nav.shortcuts"), "🪟   " L("nav.mini"), "🎨   " L("nav.tray"), "⚙️   " L("nav.system")]
 navBtns := []
 activeIndicator := g.Add("Text", "x10 y76 w4 h36 Background0067C0")
 currentPage := 1
+this.SettingsPage := 1
 SelectPage(arg1, arg2 := 0) {
 idx := (arg2 = 0 ? arg1 : arg2)
 if (idx = currentPage)
@@ -2415,6 +2361,7 @@ c.Visible := false
 for c in pages[idx]
 c.Visible := true
 currentPage := idx
+this.SettingsPage := idx
 activeIndicator.Move(10, 74 + (idx - 1) * 44)
 loop navBtns.Length {
 navBtns[A_Index].SetFont((A_Index = idx ? "s9 bold" : "s9 norm"), "Segoe UI")
@@ -2430,33 +2377,192 @@ navBtns.Push(btn)
 btnY += 44
 }
 navBtns[1].SetFont("s9 bold", "Segoe UI")
+; Interface language, at the bottom of the sidebar. The last entry adds a new language.
+g.SetFont("s9 bold", "Segoe UI")
+g.Add("Text", "x20 y468 w176 c1A1A1A BackgroundTrans", "🌐 " L("settings.language"))
+g.SetFont("s9 norm", "Segoe UI")
+langs := I18n.Available()
+langNames := [], selLang := 1
+for i, lang in langs {
+langNames.Push(lang.Name)
+if (lang.Code = I18n.Code)
+selLang := i
+}
+langNames.Push("➕ " T("settings.addLanguage"))
+ddLang := g.Add("DropDownList", "x16 y490 w182 r12 Choose" selLang, langNames)
+OnLanguagePick(*) {
+if (ddLang.Value > langs.Length) {
+ddLang.Choose(selLang)
+LanguageDialog.Show(g.Hwnd, (code, path) => MicController.ApplyLanguage(code))
+return
+}
+code := langs[ddLang.Value].Code
+if (code != I18n.Code)
+SetTimer(() => MicController.ApplyLanguage(code), -1)    ; rebuilds this window
+}
+ddLang.OnEvent("Change", OnLanguagePick)
 g.Add("Text", "x240 y525 w560 h1 0x10")
-lblSavedStatus := g.Add("Text", "x240 y546 w420 c0F7B0F", "✓ All changes save instantly")
+lblSavedStatus := g.Add("Text", "x240 y546 w420 c0F7B0F", L("settings.autoSave"))
 lblSavedStatus.SetFont("s9", "Segoe UI")
 this.SettingsSavedLbl := lblSavedStatus
-btnDone := g.Add("Button", "x680 y538 w120 h34 Default", "Done")
+btnDone := g.Add("Button", "x680 y538 w120 h34 Default", L("settings.done"))
 btnDone.SetFont("s9 bold", "Segoe UI")
 CloseSettings(*) {
+if (LanguageDialog.Gui != "") {
+try LanguageDialog.Gui.Destroy()
+LanguageDialog.Gui := ""
+}
 this.SettingsGui := ""
 this.SettingsDdMic := ""
 this.SettingsDdSpk := ""
 this.SettingsLblMicStatus := ""
 this.SettingsLblSpkStatus := ""
+this.SettingsLblMicPick := ""
 this.SettingsSavedLbl := ""
+this.CloseSettingsFn := ""
 try g.Destroy()
 }
+this.CloseSettingsFn := CloseSettings
 btnDone.OnEvent("Click", (*) => CloseSettings())
 g.OnEvent("Close", (*) => CloseSettings())
 g.OnEvent("Escape", (*) => CloseSettings())
 g.Show("w830 h590")
+if (startPage > 1 && startPage <= pages.Length)
+SelectPage(startPage)
+}
+static MicPickLabel() => this.Ui(T(this.MuteAllMics ? "audio.micLabelAll" : "audio.micLabel"))
+; Control and menu texts: "&" would underline the next letter, so it is doubled.
+static Ui(text) => StrReplace(text, "&", "&&")
+static M(key) => this.Ui(T(key))
+; ---- Interface language ---------------------------------------------------------------
+; Loads the language and rebuilds everything that shows text: tray menus and tooltips, and
+; the windows that are open (Settings reopens on the same page).
+static ApplyLanguage(code) {
+I18n.Load(code)
+this.Language := I18n.Code
+this.SaveSettings()
+this.SetupTray()
+if (this.SpkTray != "")
+this.SpkTray.Menu := this.BuildSpeakerMenu()
+if (this.CamTray != "")
+this.CamTray.Menu := this.BuildCameraMenu()
+if (this.MiniGui != "") {
+this.DestroyMiniWindow()
+this.ShowMiniWindow()
+}
+if (this.MainGui != "") {
+try this.MainGui.Destroy()
+this.MainGui := ""
+this.ShowGUI()
+}
+if (this.SettingsGui != "") {
+page := this.SettingsPage
+if this.CloseSettingsFn
+this.CloseSettingsFn.Call()
+this.ShowSettings(page)
+}
+this.UpdateState()
+}
+; ---- Device menu: Ctrl+right-click on a tray icon -------------------------------------
+; kind: "mic", "spk" or "cam". Built each time, so it lists the devices connected now.
+static ShowDevicePicker(kind, hwnd := 0) {
+m := Menu()
+if (kind = "cam") {
+this.AddCameraItems(m)
+} else {
+try this.EnumerateDevices()
+isMic := kind = "mic"
+this.AddMenuNote(m, T(isMic ? "picker.micTitle" : "picker.spkTitle"))
+if (isMic && (this.MuteAllMics || this.MicAll.Active))
+this.AddMenuNote(m, T("picker.muteAllMics"))
+m.Add()
+devices := isMic ? this.AvailableMics : this.AvailableSpeakers
+current := isMic ? this.CurrentMicName : this.CurrentSpeakerName
+if (devices.Count = 0)
+this.AddMenuNote(m, T(isMic ? "device.noMic" : "device.noSpk"))
+for name in devices {
+label := this.Ui(name)
+pick := isMic ? ((n, *) => MicController.SelectMic(n)).Bind(name)
+: ((n, *) => MicController.SelectSpeaker(n)).Bind(name)
+m.Add(label, pick)
+if (name = current)
+m.Check(label)
+}
+}
+; Kept until the next menu: the clicked item's function runs after Show() returns, and a
+; freed Menu would take its items with it.
+this.PickerMenu := m
+DllCall("SetForegroundWindow", "Ptr", hwnd ? hwnd : A_ScriptHwnd)
+m.Show()
+}
+static PickerMenu := ""
+; A greyed-out line used as a title or explanation inside a menu.
+static AddMenuNote(m, text) {
+label := this.Ui(text)
+m.Add(label, (*) => 0)
+m.Disable(label)
+}
+; Windows has no default camera: each app picks its own. The menu lists the cameras and
+; opens the Windows camera settings, where each one can be set up.
+static AddCameraItems(m) {
+this.AddMenuNote(m, T("picker.camTitle"))
+this.AddMenuNote(m, T("picker.camNote"))
+m.Add()
+cams := this.GetCameras()
+if (cams.Length = 0)
+this.AddMenuNote(m, T("picker.noCam"))
+for name in cams
+m.Add(this.Ui(name), (*) => MicController.OpenCameraSettings())
+m.Add()
+m.Add(this.M("menu.openCamera"), (*) => MicController.OpenCameraApp())
+this.SafeMenuSetIcon(m, this.M("menu.openCamera"), this.CamIconPath(true, false), 0)
+m.Add(this.M("picker.camSettings"), (*) => MicController.OpenCameraSettings())
+}
+static OpenCameraSettings() {
+try Run("ms-settings:camera")
+}
+; Names of the cameras that are connected and working (read-only WMI query).
+static GetCameras() {
+names := [], seen := Map()
+try {
+wmi := ComObjGet("winmgmts:{impersonationLevel=impersonate}!\\.\root\cimv2")
+for dev in wmi.ExecQuery("SELECT Name, Status FROM Win32_PnPEntity WHERE PNPClass = 'Camera' OR PNPClass = 'Image'") {
+try {
+name := dev.Name
+if (name != "" && dev.Status = "OK" && !seen.Has(name)) {
+seen[name] := true
+names.Push(name)
+}
+}
+}
+}
+return names
+}
+; Ctrl+right-click on the microphone icon (AutoHotkey's own tray icon) opens the device menu
+; instead of the normal menu. Returning a value stops AutoHotkey from showing its own menu.
+; Ctrl is read when the button goes down, so releasing it a little before the button still counts.
+static MicCtrlClick := false
+static OnMicTrayNotify(wParam, lParam, msg, hwnd) {
+if (hwnd != A_ScriptHwnd)
+return
+event := lParam & 0xFFFF
+if (event = 0x204)                                  ; WM_RBUTTONDOWN
+this.MicCtrlClick := IsCtrlHeld()
+if !((event = 0x204 || event = 0x205) && (this.MicCtrlClick || IsCtrlHeld()))
+return
+if (event = 0x205) {                                ; WM_RBUTTONUP
+this.MicCtrlClick := false
+SetTimer(() => MicController.ShowDevicePicker("mic"), -1)
+}
+return 1
 }
 static OnRefreshMics(*) {
 this.AutoRefreshDevices()
-MicController.Notify("Microphone list refreshed.", this.AppName, "Iconi")
+MicController.Notify(T("notify.micsRefreshed"), this.AppName, "Iconi")
 }
 static OnRefreshSpeakers(*) {
 this.AutoRefreshDevices()
-MicController.Notify("Speaker list refreshed.", this.AppName, "Iconi")
+MicController.Notify(T("notify.spksRefreshed"), this.AppName, "Iconi")
 }
 static ApplyStartup(enable) {
 shortcut := A_Startup "\HushDot.lnk"
@@ -2528,13 +2634,18 @@ this.NotifySettingsSaved()
 }
 }
 }
+; Whether Ctrl is held right now. GetKeyState("Ctrl") is not used: without a keyboard hook it
+; reads this program's own copy of the keyboard state, which stays out of date while HushDot is
+; not the active window (a tray click usually came first, and only the second one saw Ctrl).
+IsCtrlHeld() => (DllCall("GetAsyncKeyState", "Int", 0x11, "Short") & 0x8000) != 0   ; VK_CONTROL
 ; A tray icon of our own. AutoHotkey manages only one tray icon per script (the microphone),
 ; so the speaker and camera icons are added through Shell_NotifyIcon directly.
 class ExtraTrayIcon {
-__New(uid, onLeftClick, menu) {
+__New(uid, onLeftClick, menu, onCtrlRight := "") {
 this.Uid := uid
 this.OnLeftClick := onLeftClick
-this.Menu := menu
+this.Menu := menu                  ; replaced when the interface language changes
+this.OnCtrlRight := onCtrlRight    ; Ctrl+right-click: called with this icon's window handle
 this.MsgId := 0x8000 + uid         ; callback message in the WM_APP range (speaker 3, camera 4)
 this.Gui := "", this.Nid := "", this.Handler := ""
 this.Path := "", this.Idx := 0, this.Tip := "", this.LastClick := 0, this.AddRetries := 0
@@ -2628,8 +2739,11 @@ if (A_TickCount - this.LastClick < 300)
 return
 this.LastClick := A_TickCount
 this.OnLeftClick.Call()
-} else if ((event = 0x205 || event = 0x204) && this.Menu) {   ; right button
+} else if (event = 0x205 || event = 0x204) {                  ; right button
 DllCall("SetForegroundWindow", "Ptr", this.Gui.Hwnd)
+if (this.OnCtrlRight && IsCtrlHeld())
+this.OnCtrlRight.Call(this.Gui.Hwnd)
+else if this.Menu
 this.Menu.Show()
 }
 }

@@ -24,6 +24,11 @@ byte, with no decompilation, and then modified as listed below.
   `HushDot.ini`, `%APPDATA%\HushDot`, startup shortcut `HushDot.lnk`, helper
   `HushDot.Sensors.exe`, temporary file prefix `~hd_`. On first start HushDot copies TrayMute's
   settings, replaces its startup shortcut and closes a running TrayMute.
+- **v2.1: device menu and interface languages**: Ctrl+right-click on a tray icon lists its
+  devices; every interface text comes from `lib\I18n.Strings.ahk` (English) or a
+  `lang\<code>.ini` file (Português (Brasil) included); *Add a language* machine-translates the
+  English texts through Google Translate, the only feature that connects to the internet. The
+  "Créditos" button is now "Credits" (translated with the rest of the interface).
 - Version reset to v1.0, and "Pro" removed from the About page.
 - Temporary write-test file prefix changed from `~mg_` to `~tm_`.
 - Removed the original author's "Donate" and "App Website" buttons.

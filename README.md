@@ -41,6 +41,14 @@ microphone (or speaker) and the next click restores them.
 - **Switch the Windows output**: picking a speaker in Settings or Show Controls also makes it
   the Windows default output, so the browser or player moves to it. The device Windows uses
   for calls is left as it is.
+- **Quick device menu**: hold **Ctrl** and right-click the microphone or speaker icon to pick
+  another device straight from the taskbar, without opening Settings. On the camera icon it
+  lists the connected cameras and opens the Windows camera settings (Windows has no default
+  camera: each app chooses its own).
+- **Interface languages**: English and Português (Brasil) are included; pick one at the bottom
+  of the Settings sidebar. *Add a language...* machine-translates the interface into any
+  language Google Translate supports (for example Abkhaz) and saves it as an editable file in
+  the `lang` folder. See [Languages](#languages).
 - **Device selection** with automatic detection when devices are plugged in or removed.
   Inputs and outputs are told apart by what Windows reports, so device names in any
   language are listed correctly.
@@ -56,6 +64,13 @@ microphone (or speaker) and the next click restores them.
 </p>
 <p align="center">
   <img src="docs/menu.png" alt="Right-click menu of the tray icon" width="190">
+  &nbsp;
+  <img src="docs/device-menu.png" alt="Ctrl+right-click on the speaker icon: list of outputs with a check mark on the current one" width="351">
+</p>
+<p align="center">
+  <img src="docs/language.png" alt="Language list at the bottom of the Settings sidebar: English, Português (Brasil) and Add a language" width="226">
+  &nbsp;
+  <img src="docs/add-language.png" alt="Add a language window: list of Google Translate languages, language code and the privacy note" width="400">
 </p>
 
 ## Upgrading from TrayMute
@@ -81,7 +96,7 @@ Requirements: Windows 11. Choose one of the two options below.
 
 1. **Download** the `HushDot-v*.zip` file from the [latest release](https://github.com/Niptrion/HushDot/releases/latest)
    and extract it to a folder you own (for example `Documents\HushDot`). Keep `HushDot.exe`,
-   `HushDot.Sensors.exe` and the `icons` folder together.
+   `HushDot.Sensors.exe` and the `icons` and `lang` folders together.
 2. **Run** `HushDot.exe`. The executable is not code-signed, so Windows SmartScreen may show
    "Windows protected your PC". Choose **More info → Run anyway**.
 3. **Optional: verify the download.** Compare its SHA256 with the one in the release notes:
@@ -118,7 +133,8 @@ taskbar. To hide one again, drag it back onto the **^** arrow, or turn it off in
 **Settings → Personalization → Taskbar → Other system tray icons**.
 
 Left-click the microphone or speaker icon to mute or unmute it, and the camera icon to open
-the Camera app. Right-click any of them for the menu (Settings, Show Controls, Exit).
+the Camera app. Right-click any of them for the menu (Settings, Show Controls, Exit), or
+**Ctrl+right-click** for the list of devices of that icon.
 
 To start HushDot with Windows, open **Settings → System & About** and tick
 *Run HushDot on Windows Startup*. This creates a shortcut in your Startup folder (for the
@@ -135,7 +151,8 @@ not necessarily your Windows default. Open **Settings** and pick the microphone 
 actually use.
 
 With **Mute all microphones** turned on (the default), every input is muted together, so
-the choice below only matters if you turn that option off.
+the microphone you pick only matters if you turn that option off (Settings says so above the
+list). Picking a microphone does not change the Windows default recording device.
 
 If you use a virtual microphone such as NVIDIA RTX Voice or NVIDIA Broadcast, select
 the **physical** microphone that the virtual one uses as its input. Some virtual audio
@@ -197,10 +214,36 @@ Windows audio system entirely (the last case above) is not visible this way eith
 - **"Mute all speakers" also mutes virtual outputs** such as VB-Cable or Voicemeeter, which
   silences anything you stream or record through them. If you use those, turn the option off.
 
+## Languages
+
+Choose the interface language at the bottom of the **Settings** sidebar. The change applies at
+once to the tray menus, tooltips and open windows.
+
+- **Language files.** Each language is a text file in the `lang` folder next to HushDot
+  (`pt-BR.ini`, ...), one `key=value` line per text. `lang\en.ini` lists every English text and
+  is rewritten from the program when HushDot starts, so use it as the reference, not for edits.
+  Keep `{1}`, `{2}` in the translations: HushDot fills them in (a device name, a time...). A text
+  missing from a file is shown in English. If the `lang` folder is not writable, new files go to
+  `%APPDATA%\HushDot\lang`.
+- **Add a language.** Pick *Add a language...* in the list, choose a language (or type any
+  [Google Translate language code](https://cloud.google.com/translate/docs/languages)) and click
+  *Translate*. HushDot sends its English texts to Google Translate in a few small requests and
+  saves `lang\<code>.ini`. It uses Google's free web endpoint, which needs no account but is not
+  an official API, so it may be limited or stop working; machine translations can also be wrong,
+  so you may want to correct the file afterwards. A text whose `{1}` did not survive the
+  translation stays in English.
+- **Developers.** The English texts live in `lib\I18n.Strings.ahk`. `tests\i18n_test.ahk`
+  checks that every shipped language file uses known keys with the same `{1}` placeholders:
+  ```powershell
+  & "$env:LOCALAPPDATA\Programs\AutoHotkey\v2\AutoHotkey64.exe" /ErrorStdOut=UTF-8 tests\i18n_test.ahk | Out-String
+  ```
+
 ## Privacy and safety
 
-- **No telemetry and no network access.** HushDot never connects to the internet. The only
-  links (Credits and Sponsor) open in your browser when you click them.
+- **No telemetry, and no network access unless you add a language.** HushDot connects to the
+  internet only when you click *Translate* in *Add a language*: it then sends its own English
+  interface texts to Google Translate, and nothing else (no device or app names, no personal
+  data). The links (Credits and Sponsor) open in your browser when you click them.
 - **No registry changes, services or background installers.** It writes only its own
   `HushDot.ini` and, if you enable it, the startup shortcut.
 - **Muted stays muted.** If you exit HushDot while all microphones are muted, they stay
